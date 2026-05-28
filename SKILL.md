@@ -179,6 +179,23 @@ workflow 应按以下逻辑推进：
 - 无条件调用 Whisper
 - 丢失 segment 的 start 和 end 时间
 - 混淆平台字幕和转写字幕来源
+- 覆盖已经由平台字幕或自动字幕生成的正式 `raw_transcript.json`
+- 把 smoke test 产物作为后续 Batch 4 / Batch 5 的正式输入
+
+Batch 2.5 规则：
+
+1. Batch 2.5 默认只处理 `subtitle_report.json` 中 `fallback_required == true` 的情况。
+2. 正式 fallback 只应在 Batch 2 下载成功、正式 `raw_transcript.json` 不存在、且 `download_report.json` 中 `video_path` 可用或 `data/raw/videos/<run_id>/` 中存在可用视频时触发。
+3. 如果正式 `outputs/<run_id>/audit/raw_transcript.json` 已存在，必须 skip，写入 `transcription_report.json` 记录 `status: skipped` 和 `skip_reason: raw_transcript_exists`。
+4. `--force-transcription` 只能用于 smoke test，不得覆盖正式 `raw_transcript.json`。
+5. smoke test 必须输出独立产物：
+   - `outputs/<run_id>/audit/raw_transcript.smoke.json`
+   - `outputs/<run_id>/audit/transcription_report.smoke.json`
+6. smoke 产物只用于验证转写链路，不得作为后续 Batch 4 / Batch 5 的正式输入。
+7. faster-whisper fallback 的质量只用于补无字幕场景；如果平台字幕可用，应优先使用平台字幕。
+8. `base + cpu + int8` 是本地 smoke 验证默认配置，正式长视频可根据质量和耗时调整模型。
+9. Batch 2.5 不做翻译、不生成讲义、不抽帧、不生成 alignment、不生成 content_map。
+10. `raw_transcript.json` 或 `raw_transcript.smoke.json` 都应保留原始转写语言；最终 `lecture_handout.md` 必须是中文讲义，但这是后续 Batch 5 的任务。
 
 ### 抽帧阶段
 

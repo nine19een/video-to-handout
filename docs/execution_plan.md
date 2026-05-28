@@ -353,6 +353,7 @@ Batch 2.5 只能在以下条件同时成立时触发：
 - `outputs/<run_id>/audit/subtitle_report.json` 中 `fallback_required` 为 `true`。
 - 没有可用平台字幕或自动字幕。
 - `outputs/<run_id>/audit/raw_transcript.json` 尚未生成。
+- `outputs/<run_id>/audit/download_report.json` 中 `video_path` 可用，或 `data/raw/videos/<run_id>/` 中存在可用视频。
 
 如果 Batch 2 已经成功生成可用的 `raw_transcript.json`，不得进入 Batch 2.5。
 
@@ -366,6 +367,13 @@ Batch 2.5 应生成：
 - `outputs/<run_id>/audit/raw_transcript.json`
 
 `raw_transcript.json` 仍然是原始材料，不是讲义，不应做总结、翻译或知识结构整理。
+
+如果使用 force smoke test 验证已有字幕视频的转写链路，只能生成：
+
+- `outputs/<run_id>/audit/transcription_report.smoke.json`
+- `outputs/<run_id>/audit/raw_transcript.smoke.json`
+
+smoke 产物不得覆盖正式 `raw_transcript.json`，也不得作为后续 Batch 4 / Batch 5 的正式输入。
 
 ### 不包含内容
 
@@ -385,3 +393,53 @@ Batch 2.5 不得执行：
 - `raw_transcript.json` 的 segments 必须包含 `id`、`start`、`end`、`text`。
 - 转写失败不能伪装成成功。
 - Batch 2.5 只解决字幕 fallback，不进入视觉证据、对齐、内容索引或讲义生成阶段。
+
+### 验收标准
+
+skip test：
+
+- 当正式 `raw_transcript.json` 已存在时，Batch 2.5 默认必须跳过。
+- `transcription_report.json` 应记录：
+  - `status: skipped`
+  - `skip_reason: raw_transcript_exists`
+- 跳过时不得修改正式 `raw_transcript.json`。
+
+smoke test：
+
+- force transcription 只能用于 smoke test。
+- smoke test 应写入独立产物：
+  - `outputs/<run_id>/audit/transcription_report.smoke.json`
+  - `outputs/<run_id>/audit/raw_transcript.smoke.json`
+- 本地 smoke test 验收结果应能记录：
+  - `status: smoke_success`
+  - `backend: faster-whisper`
+  - `model: base`
+  - `device: cpu`
+  - `compute_type: int8`
+  - `detected_language: en`
+  - `segment_count: 10`
+  - `smoke_test: true`
+  - `smoke_seconds: 60.0`
+  - `error: null`
+
+正式 transcript 不覆盖检查：
+
+- smoke test 后，正式 `raw_transcript.json` 必须仍保持平台字幕来源。
+- 已验收的正式 transcript 特征包括：
+  - `source.type: platform_subtitle`
+  - `language: en-j3PyPqV-e1s`
+  - `segment_count: 2293`
+  - first segment text: `YANN DUBOIS: OK.`
+
+smoke 输出隔离检查：
+
+- `raw_transcript.smoke.json` 只能用于验证转写链路。
+- Batch 4 / Batch 5 不得读取 `raw_transcript.smoke.json` 作为正式输入。
+- `raw_transcript.json` 和 `raw_transcript.smoke.json` 都保留原始语言，不做翻译。
+- 最终 `lecture_handout.md` 必须是中文讲义，但这是后续 Batch 5 的任务。
+
+Batch 3/4/5 越界检查：
+
+- Batch 2.5 不得调用 FFmpeg 抽帧。
+- Batch 2.5 不得创建 `data/frames/<run_id>/` 或 `data/keyframes/<run_id>/`。
+- Batch 2.5 不得生成 `visual_segments.json`、`alignment.json`、`content_map.json`、`review_report.md` 或 `lecture_handout.md`。

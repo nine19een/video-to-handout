@@ -253,3 +253,65 @@ future rule:
 - YouTube VTT parser 必须处理 rolling caption 重复。
 - `raw_transcript.json` 保留原始字幕语言，不负责翻译。
 - 最终 `lecture_handout.md` 必须是中文讲义，但中文化表达发生在后续讲义生成阶段，不在 Batch 2 完成。
+
+### Batch 2.5 强制转写不得覆盖已有平台字幕 transcript
+
+failure name: Batch 2.5 must not overwrite existing platform transcript during forced transcription
+
+stage: Batch 2.5 Whisper / faster-whisper fallback
+
+risk:
+
+- Batch 2.5 的目标是字幕不可用时的 Whisper / faster-whisper fallback。
+- 如果 Batch 2 已经通过平台字幕生成正式 `raw_transcript.json`，后续强制转写验证可能误覆盖正式 transcript。
+- 一旦正式 transcript 被 smoke 转写结果覆盖，Batch 4 / Batch 5 可能误把不完整 smoke transcript 当作正式输入，导致内容索引和讲义生成缺失大量课程内容。
+
+wrong behavior:
+
+- 在 `raw_transcript.json` 已存在时仍执行正式 fallback。
+- 使用 `--force-transcription` 覆盖正式 `outputs/<run_id>/audit/raw_transcript.json`。
+- 将 smoke test 结果写入正式 `raw_transcript.json`。
+- 后续 Batch 4 / Batch 5 读取 `raw_transcript.smoke.json` 作为正式 transcript。
+
+prevention rule:
+
+- Batch 2.5 默认只应在以下条件同时满足时正式触发：
+  - Batch 2 下载成功。
+  - `subtitle_report.json` 中 `fallback_required` 为 `true`。
+  - 正式 `raw_transcript.json` 不存在。
+  - `download_report.json` 中 `video_path` 可用，或 `data/raw/videos/<run_id>/` 中存在可用视频。
+- 如果正式 `raw_transcript.json` 已存在，Batch 2.5 默认必须跳过，写入 `transcription_report.json`，且不得覆盖正式 transcript。
+- `--force-transcription` 只能配合 `--transcription-smoke-seconds` 用于 smoke test。
+- smoke test 必须写入独立产物：
+  - `outputs/<run_id>/audit/transcription_report.smoke.json`
+  - `outputs/<run_id>/audit/raw_transcript.smoke.json`
+- smoke transcript 只能用于验证转写链路，不得作为 Batch 4 / Batch 5 的正式输入。
+
+verification:
+
+- 本地 skip 验收结果：
+  - `status: skipped`
+  - `skip_reason: raw_transcript_exists`
+- 本地 smoke test 验收结果：
+  - `status: smoke_success`
+  - `backend: faster-whisper`
+  - `model: base`
+  - `device: cpu`
+  - `compute_type: int8`
+  - `detected_language: en`
+  - `segment_count: 10`
+  - `smoke_test: true`
+  - `smoke_seconds: 60.0`
+  - `error: null`
+- smoke test 后，正式 `raw_transcript.json` 仍保持：
+  - `source.type: platform_subtitle`
+  - `language: en-j3PyPqV-e1s`
+  - `segment_count: 2293`
+  - first segment text: `YANN DUBOIS: OK.`
+- 这说明 smoke fallback 路径能跑通，但没有污染正式 transcript。
+
+future rule:
+
+- faster-whisper fallback 的质量只用于补无字幕场景；如果平台字幕可用，应优先使用平台字幕。
+- `raw_transcript.json` 和 `raw_transcript.smoke.json` 都必须保留原始转写语言，不负责翻译。
+- 最终 `lecture_handout.md` 必须是中文讲义，但中文化表达发生在后续 Batch 5，不在 Batch 2.5 完成。
