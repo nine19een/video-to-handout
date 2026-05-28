@@ -216,3 +216,16 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Project runtime artifacts
+data/raw/videos/*
+!data/raw/videos/.gitkeep
+data/raw/subtitles/*
+!data/raw/subtitles/.gitkeep
+outputs/*/audit/*.json
+!outputs/*/audit/.gitkeep
+
+# Local credentials and cookies
+cookies*.txt
+*.cookies
+secrets/

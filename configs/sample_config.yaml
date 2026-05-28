@@ -1,3 +1,5 @@
 video_url: "https://example.com/public-lecture-video"
 run_id: "sample_run"
 output_dir: "outputs"
+preferred_subtitle_languages: ["en", "zh-Hans", "zh", "zh-CN"]
+output_language: "zh-CN"
