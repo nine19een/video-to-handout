@@ -233,6 +233,53 @@ Codex 不负责最终自证成功。
 - 关键截图不大量重复
 - 明显转场帧没有被当成关键画面
 - 每个视觉段落能回溯到视频时间
+- 首次验收应优先使用 smoke mode，例如：
+
+```bash
+python -m src.run_pipeline --config configs/sample_config.yaml --extract-visuals-only --frame-smoke-seconds 180 --frame-interval-seconds 10 --max-keyframes 12
+```
+
+- smoke 验收应检查 `outputs/<run_id>/audit/frame_report.json`：
+  - `status` 为 `smoke_success`
+  - `ffmpeg_available` 为 `true`
+  - `frame_count` 与 smoke 时长和抽帧间隔大致匹配
+  - `keyframe_count` 不超过 `max_keyframes`
+  - `error` 为 `null`
+- smoke 验收应检查 `outputs/<run_id>/audit/visual_segments.json`：
+  - `status` 为 `smoke_success`
+  - `segment_count` 等于 keyframe 数量
+  - 每个 segment 包含 `id`、`start`、`end`、`keyframe_path`、`source_frame_path`、`source_frame_time`、`reason` 和 `visual_difference_score`
+- 文件数量 sanity check：
+
+```powershell
+Get-ChildItem data\frames\<run_id> | Measure-Object
+Get-ChildItem outputs\<run_id>\assets\keyframes | Measure-Object
+```
+
+- Batch 3 不得越界生成 Batch 4 / Batch 5 产物：
+
+```powershell
+Test-Path outputs\<run_id>\audit\alignment.json
+Test-Path outputs\<run_id>\audit\content_map.json
+Test-Path outputs\<run_id>\audit\review_report.md
+Test-Path outputs\<run_id>\lecture_handout.md
+```
+
+这些检查应返回 `False`。
+- Batch 3 不使用 `data/keyframes/<run_id>/`。
+- 人工必须打开 `outputs/<run_id>/assets/keyframes/` 中的图片检查：是否来自视频、是否无明显黑屏/白屏/噪声/转场/模糊帧、是否无大量重复、是否覆盖 smoke 范围内的代表性视觉变化。
+- `visual_difference_score` 不是语义级 slide understanding；keyframe 数量也不是质量指标。smoke success 只证明 minimal verifiable visual evidence extraction loop 跑通，不代表完整视频质量可靠。
+
+### Batch 3.1 / 3.x 候选方向
+
+后续可以单独规划 Batch 3.1 或 Batch 3.x，但不应把以下方向视为 Batch 3 已完成能力：
+
+- 重复 slide 抑制
+- 黑屏、白屏、转场、模糊帧过滤增强
+- 讲者动作导致的误切抑制
+- slide-aware crop / region comparison
+- OCR 或 slide title 辅助
+- 多视频类型 profile 支持
 
 ### Agent 使用
 

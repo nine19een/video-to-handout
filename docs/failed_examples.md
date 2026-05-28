@@ -315,3 +315,121 @@ future rule:
 - faster-whisper fallback 的质量只用于补无字幕场景；如果平台字幕可用，应优先使用平台字幕。
 - `raw_transcript.json` 和 `raw_transcript.smoke.json` 都必须保留原始转写语言，不负责翻译。
 - 最终 `lecture_handout.md` 必须是中文讲义，但中文化表达发生在后续 Batch 5，不在 Batch 2.5 完成。
+
+### Batch 3 FFmpeg 缺失不得伪装为视觉提取成功
+
+failure name: Batch 3 must fail explicitly when FFmpeg is unavailable
+
+stage: Batch 3 视觉证据提取
+
+input video: Batch 2 已下载的公开视频验收样例
+
+trigger command:
+
+```bash
+python -m src.run_pipeline --config configs/sample_config.yaml --extract-visuals-only --frame-smoke-seconds 180 --frame-interval-seconds 10 --max-keyframes 12
+```
+
+symptom:
+
+- 当前环境 PATH 上没有 FFmpeg。
+- Batch 3 无法执行候选帧抽取。
+- 运行后可能已经创建空的 frame 或 keyframe 目录。
+
+wrong behavior to avoid:
+
+- 只因为目录存在就声称 Batch 3 成功。
+- 生成伪 keyframe 或伪 visual segment。
+- 静默跳过 FFmpeg preflight。
+- 不写失败报告。
+
+expected failure report:
+
+- `outputs/<run_id>/audit/frame_report.json` 必须写入：
+  - `status: failed`
+  - `ffmpeg_available: false`
+  - `ffmpeg_path: null`
+  - `ffmpeg_version: null`
+  - `frame_count: 0`
+  - `keyframe_count: 0`
+  - `error.type: FFmpegNotFound`
+  - `error.message: ffmpeg was not found on PATH.`
+  - `smoke_test: true`
+  - `smoke_seconds: 180.0`
+- `outputs/<run_id>/audit/visual_segments.json` 可以写入失败状态，但必须：
+  - `status: failed`
+  - `segments: []`
+  - `segment_count: 0`
+  - `error.type: FFmpegNotFound`
+
+verification:
+
+```bash
+python -m json.tool outputs/<run_id>/audit/frame_report.json
+python -m json.tool outputs/<run_id>/audit/visual_segments.json
+```
+
+future rule:
+
+- FFmpeg 是系统依赖，必须通过 preflight 检查。
+- FFmpeg 缺失是明确失败，不是 skip，也不是 smoke success。
+- 失败路径下可以创建空目录，但不能生成伪 keyframe，不能过度声称视觉证据已提取成功。
+
+### Batch 3 Pillow 未安装导致 keyframe 选择失败
+
+failure name: Batch 3 requires Pillow in the current Python environment
+
+stage: Batch 3 视觉证据提取
+
+input video: Batch 2 已下载的公开视频验收样例
+
+symptom:
+
+- FFmpeg 已安装并可用。
+- 候选帧可以抽出。
+- keyframe 选择阶段失败，因为当前运行 `python` 环境中没有安装 Pillow。
+
+wrong behavior to avoid:
+
+- 只因为 `requirements.txt` 写了 `Pillow` 就假设当前环境已经安装。
+- 候选帧已生成就声称 Batch 3 成功。
+- 在没有 keyframe 的情况下生成伪成功 `visual_segments.json`。
+
+expected failure report:
+
+- `outputs/<run_id>/audit/frame_report.json` 应记录：
+  - `status: failed`
+  - `ffmpeg_available: true`
+  - `frame_count` 大于 0
+  - `keyframe_count: 0`
+  - `error.type: RuntimeError`
+  - `error.message` 包含 `Pillow is not installed. Install dependencies with: pip install -r requirements.txt`
+
+fix:
+
+```bash
+python -m pip install -r requirements.txt
+```
+
+verification after fix:
+
+- smoke run 后 `frame_report.json` 应记录：
+  - `status: smoke_success`
+  - `ffmpeg_available: true`
+  - `frame_interval_seconds: 10.0`
+  - `smoke_test: true`
+  - `smoke_seconds: 180.0`
+  - `frame_count` 约为 18
+  - `keyframe_count` 不超过 `--max-keyframes`
+  - `method: ffmpeg_interval_plus_pillow_difference_v1`
+  - `error: null`
+- `visual_segments.json` 应记录：
+  - `status: smoke_success`
+  - `segment_count` 等于 keyframe 数量
+  - 每个 segment 包含 `id`、`start`、`end`、`keyframe_path`、`source_frame_path`、`source_frame_time`、`reason`、`visual_difference_score`
+
+future rule:
+
+- 验收时必须确认依赖真的安装在当前运行的 Python 环境中。
+- `requirements.txt` 是依赖声明，不是环境状态证明。
+- Batch 3 smoke success 只证明视觉证据提取链路跑通，不等于全视频视觉质量已经可靠。

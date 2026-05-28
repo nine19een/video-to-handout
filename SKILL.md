@@ -19,6 +19,114 @@ Batch 2 的目标是获取原始视频、字幕和可追溯的 `raw_transcript.j
 9. 无论视频原始语言是英文、中文还是中英混合，最终 `lecture_handout.md` 必须是中文讲义；但 Batch 2 不生成 `lecture_handout.md`，也不负责中文化表达。
 10. 字幕不可用时，Batch 2 只记录 `fallback_required` 和 `fallback_reason`，不调用 Whisper 或 faster-whisper。
 
+## Batch 3 视觉证据提取验收规则
+
+Batch 3 的目标是建立一个 minimal verifiable visual evidence extraction loop。它只负责把已下载视频转换成可检查、可回溯的候选帧、keyframe 和视觉段落，不负责理解课程语义，不负责字幕对齐，不负责内容索引，也不负责生成讲义。
+
+Batch 3 只有显式使用以下参数时才运行：
+
+```bash
+python -m src.run_pipeline --config configs/sample_config.yaml --extract-visuals-only --frame-smoke-seconds 180 --frame-interval-seconds 10 --max-keyframes 12
+```
+
+普通命令仍然只运行前面的视频和字幕获取流程，不应自动抽帧。
+
+Batch 3 的正式输出边界是：
+
+- `data/frames/<run_id>/`
+- `outputs/<run_id>/assets/keyframes/`
+- `outputs/<run_id>/audit/frame_report.json`
+- `outputs/<run_id>/audit/visual_segments.json`
+
+Batch 3 不使用 `data/keyframes/<run_id>/`，也不得生成：
+
+- `outputs/<run_id>/audit/alignment.json`
+- `outputs/<run_id>/audit/content_map.json`
+- `outputs/<run_id>/audit/review_report.md`
+- `outputs/<run_id>/lecture_handout.md`
+
+### Smoke 验收 checklist
+
+Batch 3 首次验收应优先使用 smoke mode，避免第一次就处理完整长视频。推荐检查：
+
+```powershell
+Get-Content outputs\batch2_test\audit\frame_report.json
+Get-Content outputs\batch2_test\audit\visual_segments.json
+Get-ChildItem data\frames\batch2_test | Measure-Object
+Get-ChildItem outputs\batch2_test\assets\keyframes | Measure-Object
+Test-Path outputs\batch2_test\audit\alignment.json
+Test-Path outputs\batch2_test\audit\content_map.json
+Test-Path outputs\batch2_test\audit\review_report.md
+Test-Path outputs\batch2_test\lecture_handout.md
+```
+
+使用 `--frame-smoke-seconds 180 --frame-interval-seconds 10` 时，候选帧数量大约应为 18 张。keyframe 数量必须不超过 `--max-keyframes`，但 keyframe 数量本身不是质量指标；更多 keyframe 可能意味着重复、转场或噪声进入结果。
+
+### `frame_report.json` 成功标准
+
+smoke 成功时，`frame_report.json` 至少应记录：
+
+- `status: smoke_success`
+- `ffmpeg_available: true`
+- `frame_interval_seconds`
+- `smoke_test: true`
+- `smoke_seconds`
+- `frame_count`
+- `keyframe_count`
+- `max_keyframes`
+- `duration_seconds`
+- `method: ffmpeg_interval_plus_pillow_difference_v1`
+- `error: null`
+
+失败时也必须写入 `frame_report.json`，且不得伪装成功。典型失败包括 FFmpeg 不存在、下载报告缺失、视频文件不存在、FFmpeg 执行失败、Pillow 无法读取图片、没有可接受 keyframe。
+
+### `visual_segments.json` 成功标准
+
+smoke 成功时，`visual_segments.json` 至少应记录：
+
+- `status: smoke_success`
+- `segment_count`
+- `keyframe_dir`
+- `segments`
+
+每个 segment 至少包含：
+
+- `id`
+- `start`
+- `end`
+- `keyframe_path`
+- `source_frame_path`
+- `source_frame_time`
+- `reason`
+- `visual_difference_score`
+
+`visual_segments.json` 是后续 Batch 4 对齐的视觉输入准备，不应包含字幕片段、主题归纳、知识结构或讲义内容。
+
+### 人工看图验收规则
+
+Batch 3 不能只凭 JSON 成功判定通过。人工必须打开 `outputs/<run_id>/assets/keyframes/` 中的图片并检查：
+
+- keyframes 确实来自输入视频。
+- 没有明显黑屏、白屏、噪声帧、转场帧或模糊帧。
+- 没有大量重复。
+- smoke 时间范围内的代表性视觉变化基本被覆盖。
+- 每个 keyframe 可以通过 `source_frame_time` 回溯到视频时间。
+
+需要明确的是，`visual_difference_score` 只是低层视觉差异分数，不等于语义级 slide understanding。smoke success 也不等于全视频视觉质量已经可靠，它只证明当前抽帧、筛选、报告和回溯链路跑通。
+
+### 后续 Batch 3.x 改进候选
+
+后续可以在 Batch 3.x 中改进：
+
+- 重复 slide 抑制
+- 黑屏、白屏、转场、模糊帧过滤
+- 讲者动作导致的误切抑制
+- slide-aware crop / region comparison
+- OCR 或 slide title 辅助
+- 多视频类型 profile 支持
+
+这些方向不是当前 Batch 3 已完成能力，不应在验收报告或讲义生成前过度声称。
+
 # SKILL
 
 ## 技能名称
