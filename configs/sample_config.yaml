@@ -1,11 +1,19 @@
 video_url: "https://example.com/public-lecture-video"
 run_id: "sample_run"
 output_dir: "outputs"
+
 preferred_subtitle_languages: ["en", "zh-Hans", "zh", "zh-CN"]
 output_language: "zh-CN"
+
 transcription_backend: "faster-whisper"
 transcription_model: "base"
 transcription_device: "cpu"
 transcription_compute_type: "int8"
 transcription_language:
 transcription_smoke_seconds:
+
+frame_interval_seconds: 10
+frame_smoke_seconds:
+max_keyframes: 30
+min_visual_difference_score: 0.12
+min_stable_duration_seconds: 20

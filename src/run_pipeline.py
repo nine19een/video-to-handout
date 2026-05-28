@@ -5,6 +5,8 @@ import ast
 import html
 import json
 import re
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,7 +19,36 @@ DEFAULT_TRANSCRIPTION_BACKEND = "faster-whisper"
 DEFAULT_TRANSCRIPTION_MODEL = "base"
 DEFAULT_TRANSCRIPTION_DEVICE = "cpu"
 DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "int8"
+DEFAULT_FRAME_INTERVAL_SECONDS = 10.0
+DEFAULT_MAX_KEYFRAMES = 30
+DEFAULT_MIN_VISUAL_DIFFERENCE_SCORE = 0.12
+DEFAULT_MIN_STABLE_DURATION_SECONDS = 20.0
 SUBTITLE_SUFFIXES = {".vtt", ".srt"}
+VISUAL_EXTRACTION_METHOD = "ffmpeg_interval_plus_pillow_difference_v1"
+
+
+class FFmpegNotFound(RuntimeError):
+    pass
+
+
+class FFmpegPreflightFailed(RuntimeError):
+    pass
+
+
+class FrameExtractionFailed(RuntimeError):
+    pass
+
+
+class NoCandidateFrames(RuntimeError):
+    pass
+
+
+class PillowFrameReadFailed(RuntimeError):
+    pass
+
+
+class NoAcceptableKeyframes(RuntimeError):
+    pass
 
 
 def utc_now() -> str:
@@ -614,6 +645,42 @@ def optional_positive_float(value: Any) -> float | None:
     return number
 
 
+def positive_float_or_default(value: Any, default: float, field_name: str) -> float:
+    if value is None or value == "":
+        return default
+    number = float(value)
+    if number <= 0:
+        raise ValueError(f"{field_name} must be greater than 0.")
+    return number
+
+
+def optional_positive_float_for_field(value: Any, field_name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    number = float(value)
+    if number <= 0:
+        raise ValueError(f"{field_name} must be greater than 0.")
+    return number
+
+
+def nonnegative_float_or_default(value: Any, default: float, field_name: str) -> float:
+    if value is None or value == "":
+        return default
+    number = float(value)
+    if number < 0:
+        raise ValueError(f"{field_name} must be greater than or equal to 0.")
+    return number
+
+
+def positive_int_or_default(value: Any, default: int, field_name: str) -> int:
+    if value is None or value == "":
+        return default
+    number = int(value)
+    if number <= 0:
+        raise ValueError(f"{field_name} must be greater than 0.")
+    return number
+
+
 def configured_run_dir(config: dict[str, Any]) -> Path:
     run_id = validate_run_id(str(config["run_id"]))
     output_dir = Path(str(config["output_dir"]).strip())
@@ -726,6 +793,442 @@ def find_existing_video_for_run(run_id: str, download_report: dict[str, Any]) ->
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def resolve_visual_options(
+    config: dict[str, Any],
+    frame_interval_override: float | None,
+    frame_smoke_override: float | None,
+    max_keyframes_override: int | None,
+) -> dict[str, Any]:
+    frame_interval_value = (
+        frame_interval_override
+        if frame_interval_override is not None
+        else config.get("frame_interval_seconds")
+    )
+    smoke_value = (
+        frame_smoke_override
+        if frame_smoke_override is not None
+        else config.get("frame_smoke_seconds")
+    )
+    max_keyframes_value = (
+        max_keyframes_override
+        if max_keyframes_override is not None
+        else config.get("max_keyframes")
+    )
+
+    return {
+        "frame_interval_seconds": positive_float_or_default(
+            frame_interval_value,
+            DEFAULT_FRAME_INTERVAL_SECONDS,
+            "frame_interval_seconds",
+        ),
+        "smoke_seconds": optional_positive_float_for_field(
+            smoke_value,
+            "frame_smoke_seconds",
+        ),
+        "max_keyframes": positive_int_or_default(
+            max_keyframes_value,
+            DEFAULT_MAX_KEYFRAMES,
+            "max_keyframes",
+        ),
+        "min_visual_difference_score": nonnegative_float_or_default(
+            config.get("min_visual_difference_score"),
+            DEFAULT_MIN_VISUAL_DIFFERENCE_SCORE,
+            "min_visual_difference_score",
+        ),
+        "min_stable_duration_seconds": nonnegative_float_or_default(
+            config.get("min_stable_duration_seconds"),
+            DEFAULT_MIN_STABLE_DURATION_SECONDS,
+            "min_stable_duration_seconds",
+        ),
+    }
+
+
+def frame_time_token(seconds: float) -> str:
+    return f"{seconds:010.3f}"
+
+
+def optional_duration_seconds(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    number = float(value)
+    if number < 0:
+        return None
+    return number
+
+
+def preflight_ffmpeg() -> dict[str, Any]:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path is None:
+        raise FFmpegNotFound("ffmpeg was not found on PATH.")
+
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-version"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception as error:
+        raise FFmpegPreflightFailed(f"ffmpeg -version failed: {error}") from error
+
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "ffmpeg -version failed.").strip()
+        raise FFmpegPreflightFailed(message)
+
+    version_line = result.stdout.splitlines()[0] if result.stdout.splitlines() else ""
+    return {
+        "available": True,
+        "path": ffmpeg_path,
+        "version": version_line,
+    }
+
+
+def frame_report_payload(
+    run_id: str,
+    video_path: str | None,
+    status: str,
+    options: dict[str, Any],
+    frame_dir: Path,
+    frame_count: int,
+    keyframe_dir: Path,
+    keyframe_count: int,
+    duration_seconds: float | None,
+    ffmpeg_info: dict[str, Any] | None,
+    error: BaseException | None,
+) -> dict[str, Any]:
+    ffmpeg_info = ffmpeg_info or {}
+    return {
+        "run_id": run_id,
+        "video_path": video_path,
+        "status": status,
+        "ffmpeg_available": ffmpeg_info.get("available"),
+        "ffmpeg_path": ffmpeg_info.get("path"),
+        "ffmpeg_version": ffmpeg_info.get("version"),
+        "frame_interval_seconds": options.get("frame_interval_seconds"),
+        "smoke_test": options.get("smoke_seconds") is not None,
+        "smoke_seconds": options.get("smoke_seconds"),
+        "frame_dir": str(frame_dir),
+        "frame_count": frame_count,
+        "keyframe_dir": str(keyframe_dir),
+        "keyframe_count": keyframe_count,
+        "max_keyframes": options.get("max_keyframes"),
+        "duration_seconds": duration_seconds,
+        "method": VISUAL_EXTRACTION_METHOD,
+        "error": error_payload(error) if error is not None else None,
+        "created_at": utc_now(),
+    }
+
+
+def write_frame_report(run_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
+    write_json(run_dir / "audit" / "frame_report.json", report)
+    return report
+
+
+def write_failed_visual_segments(
+    run_dir: Path,
+    run_id: str,
+    video_path: str | None,
+    keyframe_dir: Path,
+    error: BaseException,
+) -> None:
+    payload = {
+        "run_id": run_id,
+        "video_path": video_path,
+        "method": VISUAL_EXTRACTION_METHOD,
+        "status": "failed",
+        "segments": [],
+        "segment_count": 0,
+        "keyframe_dir": str(keyframe_dir),
+        "error": error_payload(error),
+        "created_at": utc_now(),
+    }
+    write_json(run_dir / "audit" / "visual_segments.json", payload)
+
+
+def write_visual_segments(
+    run_dir: Path,
+    run_id: str,
+    video_path: Path,
+    keyframe_dir: Path,
+    segments: list[dict[str, Any]],
+    smoke_test: bool,
+) -> dict[str, Any]:
+    payload = {
+        "run_id": run_id,
+        "video_path": str(video_path),
+        "method": VISUAL_EXTRACTION_METHOD,
+        "status": "smoke_success" if smoke_test else "success",
+        "segments": segments,
+        "segment_count": len(segments),
+        "keyframe_dir": str(keyframe_dir),
+        "created_at": utc_now(),
+    }
+    write_json(run_dir / "audit" / "visual_segments.json", payload)
+    return payload
+
+
+def strict_video_path_from_download_report(download_report: dict[str, Any]) -> Path:
+    raw_video_path = optional_string(download_report.get("video_path"))
+    if raw_video_path is None:
+        raise FileNotFoundError("download_report.json video_path is empty.")
+    video_path = Path(raw_video_path)
+    if not video_path.exists():
+        raise FileNotFoundError(f"Downloaded video file not found: {video_path}")
+    return video_path
+
+
+def clear_generated_visual_files(directory: Path, patterns: tuple[str, ...]) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    for pattern in patterns:
+        for path in directory.glob(pattern):
+            if path.is_file():
+                path.unlink()
+
+
+def extract_candidate_frames(
+    ffmpeg_path: str,
+    video_path: Path,
+    frame_dir: Path,
+    frame_interval_seconds: float,
+    smoke_seconds: float | None,
+) -> list[dict[str, Any]]:
+    clear_generated_visual_files(frame_dir, ("frame_*.jpg", "_raw_frame_*.jpg"))
+    raw_pattern = frame_dir / "_raw_frame_%06d.jpg"
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+    ]
+    if smoke_seconds is not None:
+        command.extend(["-t", f"{smoke_seconds:g}"])
+    command.extend(
+        [
+            "-i",
+            str(video_path),
+            "-vf",
+            f"fps=1/{frame_interval_seconds:g}",
+            "-q:v",
+            "2",
+            str(raw_pattern),
+        ]
+    )
+
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "ffmpeg frame extraction failed.").strip()
+        raise FrameExtractionFailed(message)
+
+    raw_frames = sorted(frame_dir.glob("_raw_frame_*.jpg"))
+    if not raw_frames:
+        raise NoCandidateFrames("FFmpeg completed but generated no candidate frames.")
+
+    candidates = []
+    for index, raw_path in enumerate(raw_frames, start=1):
+        frame_time = (index - 1) * frame_interval_seconds
+        frame_path = frame_dir / f"frame_{index:06d}_t{frame_time_token(frame_time)}.jpg"
+        raw_path.replace(frame_path)
+        candidates.append(
+            {
+                "path": frame_path,
+                "time": frame_time,
+            }
+        )
+    return candidates
+
+
+def import_pillow() -> tuple[Any, Any]:
+    try:
+        from PIL import Image, ImageStat
+    except ImportError as error:
+        raise RuntimeError(
+            "Pillow is not installed. Install dependencies with: pip install -r requirements.txt"
+        ) from error
+    return Image, ImageStat
+
+
+def pillow_resampling_filter(Image: Any) -> Any:
+    if hasattr(Image, "Resampling"):
+        return Image.Resampling.LANCZOS
+    return Image.LANCZOS
+
+
+def image_features(path: Path, Image: Any, ImageStat: Any) -> dict[str, Any]:
+    try:
+        with Image.open(path) as image:
+            gray = image.convert("L")
+            resample = pillow_resampling_filter(Image)
+            thumbnail = gray.resize((64, 64), resample)
+            stat = ImageStat.Stat(thumbnail)
+            histogram = thumbnail.histogram()
+            total = float(sum(histogram)) or 1.0
+            small = thumbnail.resize((8, 8), resample)
+            pixels = list(small.getdata())
+    except Exception as error:
+        raise PillowFrameReadFailed(f"Pillow could not read frame {path}: {error}") from error
+
+    average = sum(pixels) / len(pixels)
+    return {
+        "mean": float(stat.mean[0]),
+        "variance": float(stat.var[0]),
+        "histogram": [value / total for value in histogram],
+        "average_hash": tuple(1 if pixel > average else 0 for pixel in pixels),
+    }
+
+
+def is_low_information_frame(features: dict[str, Any]) -> bool:
+    mean = float(features["mean"])
+    variance = float(features["variance"])
+    if mean <= 5 and variance <= 100:
+        return True
+    if mean >= 250 and variance <= 25:
+        return True
+    return variance <= 2
+
+
+def histogram_difference(left: list[float], right: list[float]) -> float:
+    return sum(abs(a - b) for a, b in zip(left, right)) / 2
+
+
+def average_hash_difference(left: tuple[int, ...], right: tuple[int, ...]) -> float:
+    if not left or len(left) != len(right):
+        return 0.0
+    distance = sum(1 for a, b in zip(left, right) if a != b)
+    return distance / len(left)
+
+
+def visual_difference_score(
+    current_features: dict[str, Any],
+    previous_features: dict[str, Any],
+) -> float:
+    return max(
+        histogram_difference(
+            current_features["histogram"],
+            previous_features["histogram"],
+        ),
+        average_hash_difference(
+            current_features["average_hash"],
+            previous_features["average_hash"],
+        ),
+    )
+
+
+def select_keyframes(
+    candidates: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> list[dict[str, Any]]:
+    Image, ImageStat = import_pillow()
+    accepted: list[dict[str, Any]] = []
+    previous_valid_features: dict[str, Any] | None = None
+
+    for candidate in candidates:
+        features = image_features(candidate["path"], Image, ImageStat)
+        if is_low_information_frame(features):
+            continue
+
+        score = (
+            0.0
+            if previous_valid_features is None
+            else visual_difference_score(features, previous_valid_features)
+        )
+        previous_valid_features = features
+
+        if not accepted:
+            accepted.append(
+                {
+                    "source_frame_path": candidate["path"],
+                    "source_frame_time": float(candidate["time"]),
+                    "reason": "first_accepted_frame",
+                    "visual_difference_score": 0.0,
+                }
+            )
+        else:
+            seconds_since_last = float(candidate["time"]) - float(
+                accepted[-1]["source_frame_time"]
+            )
+            if (
+                score >= options["min_visual_difference_score"]
+                and seconds_since_last >= options["min_stable_duration_seconds"]
+            ):
+                accepted.append(
+                    {
+                        "source_frame_path": candidate["path"],
+                        "source_frame_time": float(candidate["time"]),
+                        "reason": "visual_difference_threshold",
+                        "visual_difference_score": score,
+                    }
+                )
+
+        if len(accepted) >= options["max_keyframes"]:
+            break
+
+    if not accepted:
+        raise NoAcceptableKeyframes(
+            "No candidate frames passed quality and difference filters."
+        )
+    return accepted
+
+
+def copy_keyframes_to_output(
+    accepted_keyframes: list[dict[str, Any]],
+    keyframe_dir: Path,
+) -> list[dict[str, Any]]:
+    clear_generated_visual_files(keyframe_dir, ("keyframe_*.jpg",))
+    copied = []
+    for index, keyframe in enumerate(accepted_keyframes, start=1):
+        frame_time = float(keyframe["source_frame_time"])
+        keyframe_path = (
+            keyframe_dir / f"keyframe_{index:04d}_t{frame_time_token(frame_time)}.jpg"
+        )
+        shutil.copy2(keyframe["source_frame_path"], keyframe_path)
+        copied.append(
+            {
+                **keyframe,
+                "keyframe_path": keyframe_path,
+            }
+        )
+    return copied
+
+
+def build_visual_segments(
+    keyframes: list[dict[str, Any]],
+    options: dict[str, Any],
+    duration_seconds: float | None,
+) -> list[dict[str, Any]]:
+    segment_end_limit = (
+        options["smoke_seconds"]
+        if options["smoke_seconds"] is not None
+        else duration_seconds
+    )
+    segments = []
+    for index, keyframe in enumerate(keyframes, start=1):
+        start = float(keyframe["source_frame_time"])
+        if index < len(keyframes):
+            end = float(keyframes[index]["source_frame_time"])
+        elif segment_end_limit is not None and float(segment_end_limit) > start:
+            end = float(segment_end_limit)
+        else:
+            end = start + float(options["frame_interval_seconds"])
+
+        segments.append(
+            {
+                "id": index,
+                "start": round(start, 3),
+                "end": round(end, 3),
+                "keyframe_path": str(keyframe["keyframe_path"]),
+                "source_frame_path": str(keyframe["source_frame_path"]),
+                "source_frame_time": round(start, 3),
+                "reason": keyframe["reason"],
+                "visual_difference_score": round(
+                    float(keyframe["visual_difference_score"]),
+                    6,
+                ),
+            }
+        )
+    return segments
 
 
 def import_faster_whisper() -> Any:
@@ -979,6 +1482,154 @@ def run_batch_2_5(
     return run_dir, report
 
 
+def run_batch_3(
+    config_path: Path,
+    frame_interval_override: float | None = None,
+    frame_smoke_override: float | None = None,
+    max_keyframes_override: int | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    config = load_config(config_path.resolve())
+    run_id = validate_run_id(str(config["run_id"]))
+    run_dir = configured_run_dir(config)
+    audit_dir = run_dir / "audit"
+    frame_dir = Path("data") / "frames" / run_id
+    keyframe_dir = run_dir / "assets" / "keyframes"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    frame_dir.mkdir(parents=True, exist_ok=True)
+    keyframe_dir.mkdir(parents=True, exist_ok=True)
+
+    options: dict[str, Any] = {
+        "frame_interval_seconds": DEFAULT_FRAME_INTERVAL_SECONDS,
+        "smoke_seconds": frame_smoke_override,
+        "max_keyframes": max_keyframes_override or DEFAULT_MAX_KEYFRAMES,
+        "min_visual_difference_score": DEFAULT_MIN_VISUAL_DIFFERENCE_SCORE,
+        "min_stable_duration_seconds": DEFAULT_MIN_STABLE_DURATION_SECONDS,
+    }
+    video_path: Path | None = None
+    video_path_text: str | None = None
+    duration_seconds: float | None = None
+    ffmpeg_info: dict[str, Any] | None = None
+    frame_count = 0
+    keyframe_count = 0
+
+    try:
+        options = resolve_visual_options(
+            config,
+            frame_interval_override,
+            frame_smoke_override,
+            max_keyframes_override,
+        )
+
+        download_report_path = audit_dir / "download_report.json"
+        if not download_report_path.exists():
+            raise FileNotFoundError(f"Missing download report: {download_report_path}")
+
+        download_report = read_json(download_report_path)
+        video_path_text = optional_string(download_report.get("video_path"))
+        duration_seconds = optional_duration_seconds(
+            download_report.get("duration_seconds")
+        )
+        if download_report.get("status") != "success":
+            raise RuntimeError("download_report.json status is not success.")
+
+        video_path = strict_video_path_from_download_report(download_report)
+        video_path_text = str(video_path)
+
+        try:
+            ffmpeg_info = preflight_ffmpeg()
+        except FFmpegNotFound as error:
+            ffmpeg_info = {
+                "available": False,
+                "path": None,
+                "version": None,
+            }
+            raise error
+        except FFmpegPreflightFailed as error:
+            ffmpeg_info = {
+                "available": True,
+                "path": shutil.which("ffmpeg"),
+                "version": None,
+            }
+            raise error
+
+        candidates = extract_candidate_frames(
+            ffmpeg_path=str(ffmpeg_info["path"]),
+            video_path=video_path,
+            frame_dir=frame_dir,
+            frame_interval_seconds=float(options["frame_interval_seconds"]),
+            smoke_seconds=options["smoke_seconds"],
+        )
+        frame_count = len(candidates)
+        selected_keyframes = select_keyframes(candidates, options)
+        copied_keyframes = copy_keyframes_to_output(selected_keyframes, keyframe_dir)
+        keyframe_count = len(copied_keyframes)
+        segments = build_visual_segments(
+            copied_keyframes,
+            options,
+            duration_seconds,
+        )
+        write_visual_segments(
+            run_dir,
+            run_id,
+            video_path,
+            keyframe_dir,
+            segments,
+            smoke_test=options["smoke_seconds"] is not None,
+        )
+
+        status = "smoke_success" if options["smoke_seconds"] is not None else "success"
+        report = frame_report_payload(
+            run_id=run_id,
+            video_path=str(video_path),
+            status=status,
+            options=options,
+            frame_dir=frame_dir,
+            frame_count=frame_count,
+            keyframe_dir=keyframe_dir,
+            keyframe_count=keyframe_count,
+            duration_seconds=duration_seconds,
+            ffmpeg_info=ffmpeg_info,
+            error=None,
+        )
+        return run_dir, write_frame_report(run_dir, report)
+    except Exception as error:
+        if isinstance(error, FFmpegNotFound) and ffmpeg_info is None:
+            ffmpeg_info = {
+                "available": False,
+                "path": None,
+                "version": None,
+            }
+        elif isinstance(error, FFmpegPreflightFailed) and ffmpeg_info is None:
+            ffmpeg_info = {
+                "available": True,
+                "path": shutil.which("ffmpeg"),
+                "version": None,
+            }
+
+        report = frame_report_payload(
+            run_id=run_id,
+            video_path=video_path_text or (str(video_path) if video_path else None),
+            status="failed",
+            options=options,
+            frame_dir=frame_dir,
+            frame_count=frame_count,
+            keyframe_dir=keyframe_dir,
+            keyframe_count=keyframe_count,
+            duration_seconds=duration_seconds,
+            ffmpeg_info=ffmpeg_info,
+            error=error,
+        )
+        write_frame_report(run_dir, report)
+        write_failed_visual_segments(
+            run_dir,
+            run_id,
+            video_path_text or (str(video_path) if video_path else None),
+            keyframe_dir,
+            error,
+        )
+        return run_dir, report
+
+
 def run_batch_2(config_path: Path) -> tuple[Path, dict[str, Any]]:
     config, run_dir = initialize_run(config_path)
     download_report, video_info = download_video(config, run_dir)
@@ -1012,6 +1663,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         help="Limit Batch 2.5 smoke transcription output to the first N seconds.",
     )
+    parser.add_argument(
+        "--extract-visuals-only",
+        action="store_true",
+        help="Run only Batch 3 visual evidence extraction.",
+    )
+    parser.add_argument(
+        "--frame-interval-seconds",
+        type=float,
+        help="Override the Batch 3 candidate frame interval in seconds.",
+    )
+    parser.add_argument(
+        "--frame-smoke-seconds",
+        type=float,
+        help="Limit Batch 3 visual extraction to the first N seconds.",
+    )
+    parser.add_argument(
+        "--max-keyframes",
+        type=int,
+        help="Limit the number of Batch 3 keyframes copied to the output directory.",
+    )
     return parser
 
 
@@ -1026,6 +1697,29 @@ def main() -> None:
             "--force-transcription and --transcription-smoke-seconds require "
             "--transcribe-fallback-only."
         )
+    if (
+        args.frame_interval_seconds is not None
+        or args.frame_smoke_seconds is not None
+        or args.max_keyframes is not None
+    ) and not args.extract_visuals_only:
+        parser.error(
+            "--frame-interval-seconds, --frame-smoke-seconds, and --max-keyframes "
+            "require --extract-visuals-only."
+        )
+    if args.extract_visuals_only and args.transcribe_fallback_only:
+        parser.error("--extract-visuals-only cannot be combined with --transcribe-fallback-only.")
+
+    if args.extract_visuals_only:
+        run_dir, frame_report = run_batch_3(
+            Path(args.config),
+            frame_interval_override=args.frame_interval_seconds,
+            frame_smoke_override=args.frame_smoke_seconds,
+            max_keyframes_override=args.max_keyframes,
+        )
+        print(f"Batch 3 output directory: {run_dir}")
+        if frame_report["status"] == "failed":
+            raise SystemExit(1)
+        return
 
     if args.transcribe_fallback_only:
         run_dir, transcription_report = run_batch_2_5(

@@ -222,6 +222,12 @@ data/raw/videos/*
 !data/raw/videos/.gitkeep
 data/raw/subtitles/*
 !data/raw/subtitles/.gitkeep
+data/frames/*
+!data/frames/.gitkeep
+data/keyframes/*
+!data/keyframes/.gitkeep
+outputs/*/assets/keyframes/*
+!outputs/*/assets/keyframes/.gitkeep
 outputs/*/audit/*.json
 !outputs/*/audit/.gitkeep
 
