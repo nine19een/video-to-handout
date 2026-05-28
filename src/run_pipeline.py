@@ -13,6 +13,10 @@ from typing import Any
 REQUIRED_CONFIG_FIELDS = ("video_url", "run_id", "output_dir")
 DEFAULT_SUBTITLE_LANGUAGES = ("en", "zh-Hans", "zh", "zh-CN")
 DEFAULT_OUTPUT_LANGUAGE = "zh-CN"
+DEFAULT_TRANSCRIPTION_BACKEND = "faster-whisper"
+DEFAULT_TRANSCRIPTION_MODEL = "base"
+DEFAULT_TRANSCRIPTION_DEVICE = "cpu"
+DEFAULT_TRANSCRIPTION_COMPUTE_TYPE = "int8"
 SUBTITLE_SUFFIXES = {".vtt", ".srt"}
 
 
@@ -24,6 +28,8 @@ def parse_scalar(value: str) -> Any:
     stripped = value.strip()
     if not stripped:
         return ""
+    if stripped.lower() in {"null", "none", "~"}:
+        return None
     if stripped[0] in {"'", '"', "["}:
         try:
             parsed = ast.literal_eval(stripped)
@@ -52,7 +58,9 @@ def load_config(config_path: Path) -> dict[str, Any]:
             config[key] = parse_scalar(value)
 
     missing_fields = [
-        field for field in REQUIRED_CONFIG_FIELDS if not str(config.get(field, "")).strip()
+        field
+        for field in REQUIRED_CONFIG_FIELDS
+        if config.get(field) is None or not str(config.get(field, "")).strip()
     ]
     if missing_fields:
         joined = ", ".join(missing_fields)
@@ -86,6 +94,14 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, indent=2, ensure_ascii=False)
         file.write("\n")
+
+
+def read_json(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        payload = json.load(file)
+    if not isinstance(payload, dict):
+        raise ValueError(f"Expected JSON object in {path}.")
+    return payload
 
 
 def initialize_run(config_path: Path) -> tuple[dict[str, Any], Path]:
@@ -582,6 +598,387 @@ def download_and_parse_subtitles(
     return report
 
 
+def optional_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def optional_positive_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    number = float(value)
+    if number <= 0:
+        raise ValueError("transcription_smoke_seconds must be greater than 0.")
+    return number
+
+
+def configured_run_dir(config: dict[str, Any]) -> Path:
+    run_id = validate_run_id(str(config["run_id"]))
+    output_dir = Path(str(config["output_dir"]).strip())
+    return output_dir / run_id
+
+
+def report_path_for_transcription(run_dir: Path, smoke_test: bool) -> Path:
+    filename = "transcription_report.smoke.json" if smoke_test else "transcription_report.json"
+    return run_dir / "audit" / filename
+
+
+def transcript_path_for_transcription(run_dir: Path, smoke_test: bool) -> Path:
+    filename = "raw_transcript.smoke.json" if smoke_test else "raw_transcript.json"
+    return run_dir / "audit" / filename
+
+
+def base_transcription_report(
+    run_id: str,
+    config: dict[str, Any],
+    video_path: str | None,
+    smoke_test: bool,
+    smoke_seconds: float | None,
+) -> dict[str, Any]:
+    return {
+        "run_id": run_id,
+        "status": "failed",
+        "video_path": video_path,
+        "backend": str(
+            config.get("transcription_backend") or DEFAULT_TRANSCRIPTION_BACKEND
+        ).strip(),
+        "model": str(
+            config.get("transcription_model") or DEFAULT_TRANSCRIPTION_MODEL
+        ).strip(),
+        "device": str(
+            config.get("transcription_device") or DEFAULT_TRANSCRIPTION_DEVICE
+        ).strip(),
+        "compute_type": str(
+            config.get("transcription_compute_type")
+            or DEFAULT_TRANSCRIPTION_COMPUTE_TYPE
+        ).strip(),
+        "configured_language": optional_string(config.get("transcription_language")),
+        "detected_language": None,
+        "segment_count": 0,
+        "smoke_test": smoke_test,
+        "smoke_seconds": smoke_seconds,
+        "error": None,
+        "created_at": utc_now(),
+    }
+
+
+def write_transcription_report(
+    run_dir: Path,
+    report: dict[str, Any],
+    smoke_test: bool,
+) -> dict[str, Any]:
+    write_json(report_path_for_transcription(run_dir, smoke_test), report)
+    return report
+
+
+def failure_transcription_report(
+    run_dir: Path,
+    run_id: str,
+    config: dict[str, Any],
+    video_path: str | None,
+    smoke_test: bool,
+    smoke_seconds: float | None,
+    error: BaseException,
+) -> dict[str, Any]:
+    report = base_transcription_report(
+        run_id, config, video_path, smoke_test, smoke_seconds
+    )
+    report["error"] = error_payload(error)
+    return write_transcription_report(run_dir, report, smoke_test)
+
+
+def skipped_transcription_report(
+    run_dir: Path,
+    run_id: str,
+    config: dict[str, Any],
+    video_path: str | None,
+    smoke_test: bool,
+    smoke_seconds: float | None,
+    skip_reason: str,
+) -> dict[str, Any]:
+    report = base_transcription_report(
+        run_id, config, video_path, smoke_test, smoke_seconds
+    )
+    report["status"] = "skipped"
+    report["skip_reason"] = skip_reason
+    return write_transcription_report(run_dir, report, smoke_test)
+
+
+def find_existing_video_for_run(run_id: str, download_report: dict[str, Any]) -> Path | None:
+    raw_video_path = optional_string(download_report.get("video_path"))
+    if raw_video_path:
+        video_path = Path(raw_video_path)
+        if video_path.exists():
+            return video_path
+
+    video_dir = Path("data") / "raw" / "videos" / run_id
+    if not video_dir.exists():
+        return None
+    candidates = [
+        path
+        for path in video_dir.iterdir()
+        if path.is_file()
+        and path.suffix.lower() not in SUBTITLE_SUFFIXES
+        and not path.name.endswith((".part", ".ytdl"))
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+def import_faster_whisper() -> Any:
+    try:
+        from faster_whisper import WhisperModel
+    except ImportError as error:
+        raise RuntimeError(
+            "faster-whisper is not installed. Install dependencies with: "
+            "pip install -r requirements.txt"
+        ) from error
+    return WhisperModel
+
+
+def transcribe_with_faster_whisper(
+    video_path: Path,
+    model_name: str,
+    device: str,
+    compute_type: str,
+    language: str | None,
+    smoke_seconds: float | None,
+) -> tuple[list[dict[str, Any]], str | None]:
+    WhisperModel = import_faster_whisper()
+    model = WhisperModel(model_name, device=device, compute_type=compute_type)
+    transcribe_options: dict[str, Any] = {}
+    if language is not None:
+        transcribe_options["language"] = language
+
+    segments_iterable, info = model.transcribe(str(video_path), **transcribe_options)
+    segments: list[dict[str, Any]] = []
+    for segment in segments_iterable:
+        start = float(segment.start)
+        end = float(segment.end)
+        if smoke_seconds is not None and start > smoke_seconds:
+            break
+        text = str(segment.text).strip()
+        if not text:
+            continue
+        segments.append(
+            {
+                "id": len(segments) + 1,
+                "start": start,
+                "end": end,
+                "text": text,
+            }
+        )
+
+    detected_language = optional_string(getattr(info, "language", None))
+    return segments, detected_language
+
+
+def write_transcription_raw_transcript(
+    run_dir: Path,
+    run_id: str,
+    report_path: Path,
+    video_path: Path,
+    report: dict[str, Any],
+    segments: list[dict[str, Any]],
+    smoke_test: bool,
+    smoke_seconds: float | None,
+) -> None:
+    payload = {
+        "run_id": run_id,
+        "source": {
+            "type": "faster_whisper_fallback",
+            "model": report["model"],
+            "language": report["configured_language"] or report["detected_language"],
+            "video_path": str(video_path),
+            "transcription_report_path": str(report_path),
+            "smoke_test": smoke_test,
+            "smoke_seconds": smoke_seconds,
+        },
+        "fallback_required": True,
+        "fallback_reason": "Subtitle fallback transcription.",
+        "segments": segments,
+        "segment_count": len(segments),
+        "created_at": utc_now(),
+    }
+    write_json(transcript_path_for_transcription(run_dir, smoke_test), payload)
+
+
+def run_batch_2_5(
+    config_path: Path,
+    force_transcription: bool = False,
+    smoke_seconds_override: float | None = None,
+) -> tuple[Path, dict[str, Any]]:
+    config = load_config(config_path.resolve())
+    run_id = validate_run_id(str(config["run_id"]))
+    run_dir = configured_run_dir(config)
+
+    try:
+        configured_smoke_seconds = optional_positive_float(
+            smoke_seconds_override
+            if smoke_seconds_override is not None
+            else config.get("transcription_smoke_seconds")
+        )
+    except Exception as error:
+        return run_dir, failure_transcription_report(
+            run_dir, run_id, config, None, False, None, error
+        )
+
+    smoke_test = configured_smoke_seconds is not None
+    formal_transcript_path = transcript_path_for_transcription(run_dir, False)
+    if formal_transcript_path.exists() and not (force_transcription and smoke_test):
+        return run_dir, skipped_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            None,
+            smoke_test,
+            configured_smoke_seconds,
+            "raw_transcript_exists",
+        )
+
+    download_report_path = run_dir / "audit" / "download_report.json"
+    if not download_report_path.exists():
+        error = FileNotFoundError(f"Missing download report: {download_report_path}")
+        return run_dir, failure_transcription_report(
+            run_dir, run_id, config, None, smoke_test, configured_smoke_seconds, error
+        )
+
+    try:
+        download_report = read_json(download_report_path)
+    except Exception as error:
+        return run_dir, failure_transcription_report(
+            run_dir, run_id, config, None, smoke_test, configured_smoke_seconds, error
+        )
+
+    video_path = find_existing_video_for_run(run_id, download_report)
+    video_path_text = str(video_path) if video_path is not None else optional_string(
+        download_report.get("video_path")
+    )
+    if download_report.get("status") != "success":
+        error = RuntimeError("download_report.json status is not success.")
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            video_path_text,
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    subtitle_report_path = run_dir / "audit" / "subtitle_report.json"
+    if not subtitle_report_path.exists():
+        error = FileNotFoundError(f"Missing subtitle report: {subtitle_report_path}")
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            video_path_text,
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    try:
+        subtitle_report = read_json(subtitle_report_path)
+    except Exception as error:
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            video_path_text,
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    if not subtitle_report.get("fallback_required") and not (
+        force_transcription and smoke_test
+    ):
+        return run_dir, skipped_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            video_path_text,
+            smoke_test,
+            configured_smoke_seconds,
+            "fallback_not_required",
+        )
+
+    if video_path is None:
+        error = FileNotFoundError("No usable downloaded video file was found.")
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            video_path_text,
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    backend = str(
+        config.get("transcription_backend") or DEFAULT_TRANSCRIPTION_BACKEND
+    ).strip()
+    if backend != "faster-whisper":
+        error = ValueError("Batch 2.5 currently supports only faster-whisper.")
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            str(video_path),
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    report = base_transcription_report(
+        run_id, config, str(video_path), smoke_test, configured_smoke_seconds
+    )
+    try:
+        segments, detected_language = transcribe_with_faster_whisper(
+            video_path=video_path,
+            model_name=report["model"],
+            device=report["device"],
+            compute_type=report["compute_type"],
+            language=report["configured_language"],
+            smoke_seconds=configured_smoke_seconds,
+        )
+        if not segments:
+            raise RuntimeError("Transcription produced no timed text segments.")
+    except Exception as error:
+        return run_dir, failure_transcription_report(
+            run_dir,
+            run_id,
+            config,
+            str(video_path),
+            smoke_test,
+            configured_smoke_seconds,
+            error,
+        )
+
+    report["status"] = "smoke_success" if smoke_test else "success"
+    report["detected_language"] = detected_language
+    report["segment_count"] = len(segments)
+    report["created_at"] = utc_now()
+    output_report_path = report_path_for_transcription(run_dir, smoke_test)
+    write_transcription_report(run_dir, report, smoke_test)
+    write_transcription_raw_transcript(
+        run_dir,
+        run_id,
+        output_report_path,
+        video_path,
+        report,
+        segments,
+        smoke_test,
+        configured_smoke_seconds,
+    )
+    return run_dir, report
+
+
 def run_batch_2(config_path: Path) -> tuple[Path, dict[str, Any]]:
     config, run_dir = initialize_run(config_path)
     download_report, video_info = download_video(config, run_dir)
@@ -593,12 +990,27 @@ def run_batch_2(config_path: Path) -> tuple[Path, dict[str, Any]]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run Batch 2 raw video and subtitle acquisition."
+        description="Run lecture video pipeline batches."
     )
     parser.add_argument(
         "--config",
         required=True,
         help="Path to the YAML config file.",
+    )
+    parser.add_argument(
+        "--transcribe-fallback-only",
+        action="store_true",
+        help="Run only Batch 2.5 fallback transcription checks and transcription.",
+    )
+    parser.add_argument(
+        "--force-transcription",
+        action="store_true",
+        help="Allow smoke-test transcription even when a formal transcript exists.",
+    )
+    parser.add_argument(
+        "--transcription-smoke-seconds",
+        type=float,
+        help="Limit Batch 2.5 smoke transcription output to the first N seconds.",
     )
     return parser
 
@@ -606,6 +1018,25 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if (args.force_transcription or args.transcription_smoke_seconds is not None) and (
+        not args.transcribe_fallback_only
+    ):
+        parser.error(
+            "--force-transcription and --transcription-smoke-seconds require "
+            "--transcribe-fallback-only."
+        )
+
+    if args.transcribe_fallback_only:
+        run_dir, transcription_report = run_batch_2_5(
+            Path(args.config),
+            force_transcription=args.force_transcription,
+            smoke_seconds_override=args.transcription_smoke_seconds,
+        )
+        print(f"Batch 2.5 output directory: {run_dir}")
+        if transcription_report["status"] == "failed":
+            raise SystemExit(1)
+        return
 
     run_dir, download_report = run_batch_2(Path(args.config))
     print(f"Batch 2 output directory: {run_dir}")
