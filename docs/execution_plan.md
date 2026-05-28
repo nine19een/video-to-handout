@@ -343,3 +343,45 @@ review_report.md 是工程验收产物。
 ### Agent 使用
 
 必须新开 Codex App thread。
+## Batch 2.5：Whisper / faster-whisper fallback
+
+### 触发条件
+
+Batch 2.5 只能在以下条件同时成立时触发：
+
+- Batch 2 视频下载成功。
+- `outputs/<run_id>/audit/subtitle_report.json` 中 `fallback_required` 为 `true`。
+- 没有可用平台字幕或自动字幕。
+- `outputs/<run_id>/audit/raw_transcript.json` 尚未生成。
+
+如果 Batch 2 已经成功生成可用的 `raw_transcript.json`，不得进入 Batch 2.5。
+
+### 目标
+
+基于 Batch 2 已下载的视频执行语音转写，为后续对齐和内容索引提供带时间戳的原始 transcript。
+
+Batch 2.5 应生成：
+
+- `outputs/<run_id>/audit/transcription_report.json`
+- `outputs/<run_id>/audit/raw_transcript.json`
+
+`raw_transcript.json` 仍然是原始材料，不是讲义，不应做总结、翻译或知识结构整理。
+
+### 不包含内容
+
+Batch 2.5 不得执行：
+
+- FFmpeg 抽帧
+- keyframe 识别
+- `visual_segments.json`
+- `alignment.json`
+- `content_map.json`
+- `review_report.md`
+- `lecture_handout.md`
+
+### 验收重点
+
+- `transcription_report.json` 记录使用的转写引擎、模型、输入视频路径、状态和错误信息。
+- `raw_transcript.json` 的 segments 必须包含 `id`、`start`、`end`、`text`。
+- 转写失败不能伪装成成功。
+- Batch 2.5 只解决字幕 fallback，不进入视觉证据、对齐、内容索引或讲义生成阶段。

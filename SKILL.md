@@ -1,3 +1,24 @@
+## Batch 2 字幕获取与 transcript 质量规则
+
+Batch 2 的目标是获取原始视频、字幕和可追溯的 `raw_transcript.json`，不是生成讲义，也不是做内容索引。
+
+必须遵守以下规则：
+
+1. 下载成功不等于 Batch 2 通过。即使 `download_report.json` 和 `subtitle_report.json` 显示成功，也必须抽查 `raw_transcript.json` 的前若干 segment，确认字幕文本可用于后续内容索引。
+2. 字幕选择必须优先 platform subtitles，再考虑 automatic captions。
+3. 字幕语言匹配必须支持 prefix-compatible match。例如 `preferred_subtitle_languages` 包含 `en` 时，平台返回的 `en-j3PyPqV-e1s` 必须视为可选 platform subtitle，而不是直接退回 automatic captions。
+4. 字幕选择优先级必须是：
+   - platform subtitles exact match
+   - platform subtitles prefix-compatible match
+   - automatic captions exact match
+   - automatic captions prefix-compatible match
+5. `subtitle_report.json` 中的 `selected_language` 必须记录实际使用的字幕 language key。
+6. `raw_transcript.json` 的 `source.language` 必须记录实际使用的字幕 language key。
+7. YouTube VTT parser 必须清理 rolling caption 重复，包括 inline timestamp tags、极短重复 cue、相邻完全重复 cue 和相邻包含关系 cue。
+8. parser 不得总结、翻译或改写字幕含义。`raw_transcript.json` 必须保留平台字幕或自动字幕的原始语言。
+9. 无论视频原始语言是英文、中文还是中英混合，最终 `lecture_handout.md` 必须是中文讲义；但 Batch 2 不生成 `lecture_handout.md`，也不负责中文化表达。
+10. 字幕不可用时，Batch 2 只记录 `fallback_required` 和 `fallback_reason`，不调用 Whisper 或 faster-whisper。
+
 # SKILL
 
 ## 技能名称

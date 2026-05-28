@@ -245,3 +245,10 @@ Plan → Execute → Verify → Fix → Solidify
 工程验收数据和中间过程数据统一放入 audit 目录。
 
 项目后续实现必须围绕“视频转讲义”推进，而不是围绕“视频转 transcript 和 notes”推进。
+## 语言输出原则
+
+无论视频原始语言是英文、中文还是中英混合，最终学习产物 `outputs/<run_id>/lecture_handout.md` 必须是中文讲义。
+
+`raw_transcript.json` 应保留平台字幕或转写结果的原始语言，并记录其来源语言。Batch 2 和 Batch 2.5 不负责把 transcript 翻译成中文，也不负责生成中文讲义。
+
+中文化表达发生在后续讲义生成阶段。后续生成 `lecture_handout.md` 时，应基于 transcript、keyframes、alignment 和 content_map，把课程内容整理成适合中文读者直接学习的中文讲义，而不是把 `raw_transcript.json` 直接当作最终输出。

@@ -173,3 +173,83 @@ run_id：
 本文件目前只提供失败案例记录模板和分类规则。
 
 真实失败案例将在后续运行和人工验收后追加。
+## 真实失败样例
+
+### Batch 2 字幕选择和 YouTube rolling captions 污染 raw_transcript
+
+failure name: Batch 2 subtitle source fallback and rolling caption duplication
+
+stage: Batch 2 原始材料获取
+
+input video: https://www.youtube.com/watch?v=r1qZpYAmqmg
+
+symptom:
+
+- 视频下载成功。
+- 字幕下载成功。
+- 但 `raw_transcript.json` 质量不合格，连续 segment 大量重叠。
+- `subtitle_report.json` 中 `available_platform_subtitles` 包含 `en-j3PyPqV-e1s`。
+- `preferred_subtitle_languages` 中包含 `en`。
+- 旧逻辑选择了 `selected_source: automatic` 和 `selected_language: en`，而不是可用的平台字幕。
+
+wrong behavior:
+
+- 旧字幕选择逻辑只做精确语言匹配。
+- 当平台字幕 language key 为 `en-j3PyPqV-e1s` 时，`preferred=en` 没有命中平台字幕。
+- workflow 退而选择 YouTube automatic captions。
+- automatic captions 的 VTT 被直接解析后，产生 rolling caption 重复，例如：
+  - `Okay, let's get started. So, hi`
+  - `Okay, let's get started. So, hi everyone. My name is Yan. I'm a`
+  - `everyone. My name is Yan. I'm a`
+
+root cause:
+
+- 字幕选择没有支持 prefix-compatible language key。
+- VTT parser 没有针对 YouTube automatic captions 中的 inline timestamp tags 和 rolling captions 做清理。
+- Batch 2 验收只看“字幕文件是否存在”不足以判断 transcript 是否可用于后续 `content_map` 和 `lecture_handout`。
+
+fix:
+
+- 字幕选择优先级固定为：
+  1. platform subtitles exact match
+  2. platform subtitles prefix-compatible match
+  3. automatic captions exact match
+  4. automatic captions prefix-compatible match
+- 当 `preferred=en` 且平台字幕存在 `en-j3PyPqV-e1s` 时，必须选择该 platform subtitle。
+- `subtitle_report.json` 的 `selected_language` 必须记录实际传给 yt-dlp 的 language key，例如 `en-j3PyPqV-e1s`。
+- `raw_transcript.json` 的 `source.language` 必须记录实际使用的 language key。
+- VTT parser 必须清理：
+  - YouTube inline timestamp tags
+  - rolling caption 重复
+  - 极短重复 cue
+  - 相邻完全重复 cue
+  - 相邻包含关系 cue
+- parser 不得总结、翻译或改写字幕含义。
+
+verification:
+
+- 修复后 `subtitle_report.json` 记录：
+  - `selected_source: platform`
+  - `selected_language: en-j3PyPqV-e1s`
+  - `segment_count: 2293`
+  - `fallback_required: false`
+- 修复后 `raw_transcript.json` 的 source 记录：
+  - `type: platform_subtitle`
+  - `language: en-j3PyPqV-e1s`
+  - `is_auto_generated: false`
+- 修复后 transcript 开头不再出现 rolling captions 的连续重叠，前几个 segment 类似：
+  - `YANN DUBOIS: OK.`
+  - `Let's get started.`
+  - `So hi, everyone.`
+  - `My name is Yann.`
+  - `I'm a researcher at OpenAI.`
+
+future rule:
+
+- Batch 2 不能只因为视频和字幕文件下载成功就判定通过。
+- Batch 2 验收必须抽查 `raw_transcript.json` 的前若干 segment，确认它不是 rolling captions、空字幕、无时间戳文本或重复污染文本。
+- 字幕选择必须优先平台字幕，再考虑自动字幕。
+- 语言匹配必须支持 prefix-compatible match。
+- YouTube VTT parser 必须处理 rolling caption 重复。
+- `raw_transcript.json` 保留原始字幕语言，不负责翻译。
+- 最终 `lecture_handout.md` 必须是中文讲义，但中文化表达发生在后续讲义生成阶段，不在 Batch 2 完成。
