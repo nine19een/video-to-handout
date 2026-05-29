@@ -434,3 +434,51 @@ future rule:
 - 验收时必须确认依赖真的安装在当前运行的 Python 环境中。
 - `requirements.txt` 是依赖声明，不是环境状态证明。
 - Batch 3 smoke success 只证明视觉证据提取链路跑通，不等于全视频视觉质量已经可靠。
+
+### Batch 3 旧视觉产物污染验收
+
+failure name: Batch 3 validation must not trust stale visual artifacts
+
+stage: Batch 3 / Batch 3.x 视觉证据提取验收
+
+risk:
+
+- 同一个 `run_id` 重复执行 smoke 或失败路径验证时，目录中可能残留旧 `frame_report.json`、`visual_segments.json`、候选帧或 keyframe。
+- 如果验收 Agent 只读取历史报告或历史图片，可能把旧产物误判为新代码通过。
+
+wrong behavior to avoid:
+
+- 没有清理旧报告和旧图片就直接检查结果。
+- FFmpeg 缺失、抽帧失败或筛选失败后，仍用历史 keyframe 证明本轮成功。
+- 只因为目录存在或图片存在就判定 Batch 3 通过。
+
+prevention rule:
+
+- 重新验收某个 `run_id` 前，应清理该 run 的旧视觉报告和旧视觉图片，或确认本轮实现会清理自身生成的旧 frame/keyframe。
+- smoke 后应检查报告 `created_at`、`status`、`error`、`frame_count`、`keyframe_count` 和实际目录内容是否一致。
+- 验收 Agent 不得使用历史报告证明新代码通过。
+
+### Batch 3 all-rejected 失败路径必须保留 rejected stats
+
+failure name: all-rejected quality filtering must remain diagnosable
+
+stage: Batch 3.x keyframe selection
+
+risk:
+
+- 所有候选帧都被质量过滤拒绝时，Batch 3.x 应失败。
+- 但失败报告如果丢失 `rejected_frame_count`、`rejected_reasons`、`quality_checks` 或 `keyframe_selection`，人工无法判断失败是合理过滤、阈值过严，还是实现 bug。
+
+wrong behavior to avoid:
+
+- `NoAcceptableKeyframes` 抛出后只写空 summary。
+- `frame_report.json` 显示 failed，但 rejected stats 全为 0 或空对象。
+- `visual_segments.json` 伪装成成功，或生成空壳 segments。
+
+expected behavior:
+
+- `frame_report.json` 必须保持 `status: failed`。
+- `keyframe_count` 必须为 0。
+- `rejected_frame_count` 必须反映真实被拒绝帧数。
+- `rejected_reasons`、`quality_checks` 和 `keyframe_selection` 必须保留可诊断信息。
+- `visual_segments.json` 如写出，应为 failed + `segments: []`，并尽量带上同一批 quality / selection summary。

@@ -544,3 +544,30 @@ lecture_handout.md 应满足以下标准：
 - SKILL.md 已定义 workflow 规则
 - README.md 与当前目标一致
 - docs/failed_examples.md 可用于记录失败案例
+
+## Batch 3.x 独立验收沉淀
+
+Batch 3.x 的定位仍然是 visual evidence extraction，不是 semantic slide understanding。它只负责把已下载视频转换为可检查、可回溯的候选帧、keyframe、视觉段落和审计报告。
+
+Batch 3.x 通过验收时，只能说明 minimal verifiable visual evidence extraction loop 跑通，包括抽帧、质量过滤、重复抑制、区域比较、OCR hook 降级、失败报告和边界检查。它不代表完整视频视觉质量已经可靠，也不代表系统已经理解幻灯片语义。
+
+自动验收应覆盖：
+
+- full frame smoke 能生成合法 `frame_report.json` 和 `visual_segments.json`
+- center crop 能真实参与 visual difference scoring
+- invalid manual crop 能 fallback 到 full frame 并记录 warning
+- OCR 默认 `none/skipped` 是安全降级；tesseract 不可用时不应影响 keyframe 成功条件
+- all-rejected quality filtering 必须失败，但必须保留 `rejected_frame_count`、`rejected_reasons`、`quality_checks` 和 `keyframe_selection`
+- keyframe 输出文件应是完整原图；crop 只影响比较区域，不应把裁剪图当作最终 keyframe
+- Batch 4 / Batch 5 产物不得在 Batch 3.x 验收中生成
+- `configs/sample_config.yaml` 应保持 placeholder，不写入真实验收视频 URL
+
+人工看图验收应覆盖自动检查无法判断的内容：
+
+- keyframe 是否确实来自输入视频
+- 是否存在明显黑屏、白屏、噪声帧、转场帧或模糊帧
+- 是否重复过多
+- smoke 范围内的主要视觉变化是否基本覆盖
+- 是否值得把当前视觉证据交给后续 Batch 4 使用
+
+Batch 3.x smoke success 不是 full-video quality guarantee。keyframe 数量减少也不是单独失败依据，可能是重复抑制生效；但报告必须解释减少原因，并由人工看图确认没有漏掉重要视觉变化。

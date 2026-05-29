@@ -176,3 +176,21 @@ Agent 不能只说“已完成”。
 - outputs/<run_id>/audit/review_report.md
 
 不要只在聊天中口头记住失败案例。
+
+## Validation Agent Problem Handling Policy
+
+独立验收 Agent 的职责是验证已实现内容是否符合批准的边界和验收标准，而不是继续开发新功能，也不是替实现 Agent 自证成功。
+
+验收 Agent 遇到问题时，应先判断问题属于被验收对象本身不合格，还是验收过程受环境、素材、权限或历史产物影响。
+
+验收结论和动作应区分为五类：
+
+- FAIL：被验收对象本身违反验收标准，应交回实现 Agent 修复。典型情况包括 JSON 非法、旧字段被删除、Batch 4/5 越界产物被生成、运行产物进入 Git、报告字段为空壳、或功能结果与批准目标不一致。
+- AGENT_FIX_AND_CONTINUE：验收过程被可安全处理的问题阻塞或污染，且验收 Agent 能在权限范围内修复后继续。典型情况包括清理旧报告、清理旧图片、重建临时 config、补跑只读检查或重新执行批准范围内的 smoke 验证。
+- AGENT_RECORD_AND_CONTINUE：问题不阻塞验收，但应记录为风险或后续改进项。典型情况包括 CRLF warning、非阻塞 deprecation warning、字段命名语义小问题。
+- HUMAN_REVIEW_REQUIRED：自动检查无法判断主观质量，需要人工决策。典型情况包括 keyframe 是否有学习价值、是否重复过多、是否漏掉重要视觉变化、是否值得进入下一阶段。
+- BLOCKED：验收环境、素材、权限或系统依赖不足，导致验收无法继续，需要用户处理。典型情况包括 FFmpeg 不在 PATH、视频文件缺失、权限不足、需要用户安装系统工具或重启 shell。
+
+FAIL 和 BLOCKED 不应混用。FAIL 表示实现不合格；BLOCKED 表示验收条件不足。
+
+HUMAN_REVIEW_REQUIRED 不应阻止自动检查继续执行。自动检查完成后，再把主观判断点交给人工确认。

@@ -504,3 +504,27 @@ Batch 3/4/5 越界检查：
 - Batch 2.5 不得调用 FFmpeg 抽帧。
 - Batch 2.5 不得创建 `data/frames/<run_id>/` 或 `data/keyframes/<run_id>/`。
 - Batch 2.5 不得生成 `visual_segments.json`、`alignment.json`、`content_map.json`、`review_report.md` 或 `lecture_handout.md`。
+
+## Batch 3.x Solidify 状态
+
+Batch 3.x 已完成并通过独立验收 Agent 和人工看图验收。该结论只覆盖视觉证据提取链路，不代表语义级视觉理解已经完成。
+
+已验收能力包括：
+
+- 坏帧过滤
+- 重复抑制与稳定段合并
+- full frame / center crop / invalid manual crop fallback 的区域比较行为
+- OCR `none/skipped` 和 tesseract 不可用时的安全降级 hook
+- all-rejected quality filtering 失败路径保留 rejected stats
+- JSON 合法性、Batch 4/5 越界检查、sample config placeholder 和 Git hygiene
+
+Batch 4 的前置条件已满足：后续可以使用已验收的 `outputs/<run_id>/audit/visual_segments.json` 和 `outputs/<run_id>/assets/keyframes/` 作为视觉输入。
+
+Batch 4 尚未开始。Batch 3.x Solidify 不得生成：
+
+- `outputs/<run_id>/audit/alignment.json`
+- `outputs/<run_id>/audit/content_map.json`
+- `outputs/<run_id>/audit/review_report.md`
+- `outputs/<run_id>/lecture_handout.md`
+
+Batch 4 应基于 Batch 3.x 已验收的 visual segments 和 keyframes 进行字幕对齐与内容索引准备，不应把 Batch 3.x 误写成语义理解模块。
