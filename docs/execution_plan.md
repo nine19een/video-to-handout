@@ -552,3 +552,37 @@ Batch 4 尚未开始。Batch 3.x Solidify 不得生成：
 - `outputs/<run_id>/lecture_handout.md`
 
 Batch 4 应基于 Batch 3.x 已验收的 visual segments 和 keyframes 进行字幕对齐与内容索引准备，不应把 Batch 3.x 误写成语义理解模块。
+
+## Batch 4.5A-fix-1：Resolution Diagnosis / 1080p Acquisition Repair
+
+### 目标
+
+修复课程视觉证据的分辨率链路，只处理下载格式选择和分辨率报告，不处理 keyframe 全时段覆盖，也不处理过程性动画中间态 collapse。
+
+### 包含内容
+
+- Batch 2 yt-dlp format selection 默认优先 1080p。
+- 默认 `target_video_height: 1080`、`min_video_height: 1080`、`allow_video_resolution_fallback: false`。
+- `download_report.json` 记录格式选择、实际 format id、width、height、resolution、codec、filesize 和 `resolution_check`。
+- Batch 3 `frame_report.json` 记录 raw video / extracted frame / keyframe resolution。
+- keyframe height 低于 `min_keyframe_height` 时必须可诊断，不得伪装为合格视觉证据。
+
+### 不包含内容
+
+- 不实现时间分桶 keyframe selection。
+- 不实现 tail coverage guarantee。
+- 不实现 animation intermediate collapse。
+- 不运行 Batch 4 alignment。
+- 不进入 Batch 5。
+- 不生成 `content_map.json`、`review_report.md` 或 `lecture_handout.md`。
+
+### 验收门
+
+- 当前低清历史产物能被诊断为 `640x360`。
+- `configs/sample_config.yaml` 保持 placeholder URL 和 `sample_run`。
+- `python -m py_compile src/run_pipeline.py` 通过。
+- `python -m src.run_pipeline --help` 通过。
+- `git diff --check` 通过。
+- 没有运行 full-video visual extraction。
+- 没有运行 Batch 4 alignment。
+- 没有 commit。

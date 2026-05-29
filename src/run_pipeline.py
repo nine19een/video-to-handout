@@ -15,6 +15,10 @@ from typing import Any
 REQUIRED_CONFIG_FIELDS = ("video_url", "run_id", "output_dir")
 DEFAULT_SUBTITLE_LANGUAGES = ("en", "zh-Hans", "zh", "zh-CN")
 DEFAULT_OUTPUT_LANGUAGE = "zh-CN"
+DEFAULT_TARGET_VIDEO_HEIGHT = 1080
+DEFAULT_MIN_VIDEO_HEIGHT = 1080
+DEFAULT_ALLOW_VIDEO_RESOLUTION_FALLBACK = False
+DEFAULT_MIN_KEYFRAME_HEIGHT = 1080
 DEFAULT_TRANSCRIPTION_BACKEND = "faster-whisper"
 DEFAULT_TRANSCRIPTION_MODEL = "base"
 DEFAULT_TRANSCRIPTION_DEVICE = "cpu"
@@ -114,6 +118,22 @@ class InvalidTimeline(RuntimeError):
     pass
 
 
+class DownloadedVideoResolutionUnknown(RuntimeError):
+    pass
+
+
+class TargetResolutionUnavailable(RuntimeError):
+    pass
+
+
+class DownloadedVideoBelowMinimumResolution(RuntimeError):
+    pass
+
+
+class KeyframeResolutionBelowMinimum(RuntimeError):
+    pass
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -124,6 +144,8 @@ def parse_scalar(value: str) -> Any:
         return ""
     if stripped.lower() in {"null", "none", "~"}:
         return None
+    if stripped.lower() in {"true", "false"}:
+        return stripped.lower() == "true"
     if stripped[0] in {"'", '"', "["}:
         try:
             parsed = ast.literal_eval(stripped)
@@ -248,6 +270,280 @@ def import_yt_dlp() -> Any:
     return YoutubeDL
 
 
+def find_executable(name: str) -> str | None:
+    found = shutil.which(name) or shutil.which(f"{name}.exe")
+    if found is not None:
+        return found
+    where_path = shutil.which("where.exe")
+    if where_path is None:
+        return None
+    try:
+        result = subprocess.run(
+            [where_path, name],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception:
+        return None
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        candidate = line.strip()
+        if candidate:
+            return candidate
+    return None
+
+
+def bool_or_default(value: Any, default: bool) -> bool:
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    normalized = str(value).strip().lower()
+    if normalized in {"true", "1", "yes", "y", "on"}:
+        return True
+    if normalized in {"false", "0", "no", "n", "off"}:
+        return False
+    raise ValueError(f"Expected boolean value, got: {value!r}")
+
+
+def resolve_download_options(config: dict[str, Any]) -> dict[str, Any]:
+    target_height = positive_int_or_default(
+        config.get("target_video_height"),
+        DEFAULT_TARGET_VIDEO_HEIGHT,
+        "target_video_height",
+    )
+    min_height = positive_int_or_default(
+        config.get("min_video_height"),
+        DEFAULT_MIN_VIDEO_HEIGHT,
+        "min_video_height",
+    )
+    if min_height > target_height:
+        raise ValueError("min_video_height must be less than or equal to target_video_height.")
+    override = optional_string(config.get("yt_dlp_format"))
+    allow_fallback = bool_or_default(
+        config.get("allow_video_resolution_fallback"),
+        DEFAULT_ALLOW_VIDEO_RESOLUTION_FALLBACK,
+    )
+    if override is not None:
+        selector = override
+    else:
+        selector = (
+            f"bestvideo[height<={target_height}][height>={min_height}][ext=mp4]+"
+            "bestaudio[ext=m4a]/"
+            f"bestvideo[height<={target_height}][height>={min_height}]+bestaudio/"
+            f"best[height<={target_height}][height>={min_height}]/"
+            f"bestvideo[height>={min_height}][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height>={min_height}]+bestaudio/"
+            f"best[height>={min_height}]"
+        )
+        if allow_fallback:
+            selector = f"{selector}/best"
+    return {
+        "target_video_height": target_height,
+        "min_video_height": min_height,
+        "allow_video_resolution_fallback": allow_fallback,
+        "yt_dlp_format": override,
+        "effective_format_selector": selector,
+    }
+
+
+def first_requested_video_format(info: dict[str, Any]) -> dict[str, Any]:
+    requested_formats = info.get("requested_formats")
+    if isinstance(requested_formats, list):
+        for item in requested_formats:
+            if isinstance(item, dict) and item.get("vcodec") not in {None, "none"}:
+                return item
+    return info
+
+
+def requested_format_id(info: dict[str, Any]) -> str | None:
+    requested_formats = info.get("requested_formats")
+    if isinstance(requested_formats, list) and requested_formats:
+        ids = [
+            str(item.get("format_id"))
+            for item in requested_formats
+            if isinstance(item, dict) and item.get("format_id") is not None
+        ]
+        return "+".join(ids) if ids else None
+    value = info.get("format_id")
+    return str(value) if value is not None else None
+
+
+def probe_video_metadata(video_path: Path) -> dict[str, Any]:
+    ffprobe_path = find_executable("ffprobe")
+    if ffprobe_path is None:
+        return probe_video_metadata_with_ffmpeg(video_path)
+
+    command = [
+        ffprobe_path,
+        "-v",
+        "error",
+        "-show_entries",
+        "stream=codec_type,codec_name,width,height",
+        "-of",
+        "json",
+        str(video_path),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception as error:
+        return {
+            "available": True,
+            "width": None,
+            "height": None,
+            "vcodec": None,
+            "acodec": None,
+            "warning": f"ffprobe failed: {error}",
+        }
+    if result.returncode != 0:
+        message = (result.stderr or result.stdout or "ffprobe failed.").strip()
+        return {
+            "available": True,
+            "width": None,
+            "height": None,
+            "vcodec": None,
+            "acodec": None,
+            "warning": message,
+        }
+    try:
+        payload = json.loads(result.stdout or "{}")
+    except json.JSONDecodeError as error:
+        return {
+            "available": True,
+            "width": None,
+            "height": None,
+            "vcodec": None,
+            "acodec": None,
+            "warning": f"ffprobe returned invalid JSON: {error}",
+        }
+
+    video_stream = None
+    audio_stream = None
+    for stream in payload.get("streams") or []:
+        if not isinstance(stream, dict):
+            continue
+        if stream.get("codec_type") == "video" and video_stream is None:
+            video_stream = stream
+        if stream.get("codec_type") == "audio" and audio_stream is None:
+            audio_stream = stream
+
+    return {
+        "available": True,
+        "width": video_stream.get("width") if video_stream else None,
+        "height": video_stream.get("height") if video_stream else None,
+        "vcodec": video_stream.get("codec_name") if video_stream else None,
+        "acodec": audio_stream.get("codec_name") if audio_stream else None,
+        "warning": None if video_stream else "ffprobe found no video stream.",
+    }
+
+
+def probe_video_metadata_with_ffmpeg(video_path: Path) -> dict[str, Any]:
+    ffmpeg_path = find_executable("ffmpeg")
+    if ffmpeg_path is None:
+        return {
+            "available": False,
+            "width": None,
+            "height": None,
+            "vcodec": None,
+            "acodec": None,
+            "warning": "Neither ffprobe nor ffmpeg was found on PATH.",
+        }
+    try:
+        result = subprocess.run(
+            [ffmpeg_path, "-hide_banner", "-i", str(video_path)],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except Exception as error:
+        return {
+            "available": True,
+            "width": None,
+            "height": None,
+            "vcodec": None,
+            "acodec": None,
+            "warning": f"ffmpeg metadata probe failed: {error}",
+        }
+
+    text = "\n".join(part for part in (result.stderr, result.stdout) if part)
+    video_line = next(
+        (line.strip() for line in text.splitlines() if " Video: " in line),
+        "",
+    )
+    audio_line = next(
+        (line.strip() for line in text.splitlines() if " Audio: " in line),
+        "",
+    )
+    resolution_match = re.search(r"(?<![A-Za-z0-9])(\d{2,5})x(\d{2,5})(?![A-Za-z0-9])", video_line)
+    codec_match = re.search(r"Video:\s*([^,\s]+)", video_line)
+    audio_match = re.search(r"Audio:\s*([^,\s]+)", audio_line)
+    if resolution_match is None:
+        return {
+            "available": True,
+            "width": None,
+            "height": None,
+            "vcodec": codec_match.group(1) if codec_match else None,
+            "acodec": audio_match.group(1) if audio_match else None,
+            "warning": "ffmpeg fallback found no video resolution.",
+        }
+    return {
+        "available": True,
+        "width": int(resolution_match.group(1)),
+        "height": int(resolution_match.group(2)),
+        "vcodec": codec_match.group(1) if codec_match else None,
+        "acodec": audio_match.group(1) if audio_match else None,
+        "warning": "ffprobe was not found; used ffmpeg metadata fallback.",
+    }
+
+
+def resolution_text(width: Any, height: Any) -> str | None:
+    if width is None or height is None:
+        return None
+    return f"{width}x{height}"
+
+
+def resolution_check(
+    actual_height: int | None,
+    target_height: int,
+    min_height: int,
+    allow_fallback: bool,
+) -> dict[str, Any]:
+    if actual_height is None:
+        return {
+            "status": "unknown",
+            "message": "Downloaded video height could not be determined.",
+            "target_height": target_height,
+            "min_height": min_height,
+            "actual_height": None,
+        }
+    if actual_height >= min_height:
+        return {
+            "status": "success",
+            "message": "Downloaded video height meets the configured minimum.",
+            "target_height": target_height,
+            "min_height": min_height,
+            "actual_height": actual_height,
+        }
+    return {
+        "status": "degraded" if allow_fallback else "failed",
+        "message": (
+            "Downloaded video is below min_video_height; fallback was accepted."
+            if allow_fallback
+            else "Downloaded video is below min_video_height and fallback is disabled."
+        ),
+        "target_height": target_height,
+        "min_height": min_height,
+        "actual_height": actual_height,
+    }
+
+
 def find_downloaded_video(info: dict[str, Any], video_dir: Path) -> Path | None:
     for item in info.get("requested_downloads") or []:
         raw_path = item.get("filepath") or item.get("_filename")
@@ -281,6 +577,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
     video_dir = Path("data") / "raw" / "videos" / run_id
     video_dir.mkdir(parents=True, exist_ok=True)
     report_path = audit_dir / "download_report.json"
+    download_options = resolve_download_options(config)
 
     base_report: dict[str, Any] = {
         "run_id": run_id,
@@ -294,6 +591,30 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         "extractor": None,
         "extractor_key": None,
         "webpage_url": None,
+        "requested_format": download_options["yt_dlp_format"],
+        "effective_format_selector": download_options["effective_format_selector"],
+        "target_video_height": download_options["target_video_height"],
+        "min_video_height": download_options["min_video_height"],
+        "allow_video_resolution_fallback": download_options[
+            "allow_video_resolution_fallback"
+        ],
+        "downloaded_format_id": None,
+        "downloaded_ext": None,
+        "downloaded_width": None,
+        "downloaded_height": None,
+        "downloaded_resolution": None,
+        "downloaded_vcodec": None,
+        "downloaded_acodec": None,
+        "downloaded_filesize": None,
+        "downloaded_filesize_approx": None,
+        "resolution_check": {
+            "status": "unknown",
+            "message": "Download has not completed.",
+            "target_height": download_options["target_video_height"],
+            "min_height": download_options["min_video_height"],
+            "actual_height": None,
+        },
+        "warnings": [],
         "error": None,
         "created_at": utc_now(),
     }
@@ -301,18 +622,35 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
     try:
         YoutubeDL = import_yt_dlp()
         ydl_opts = {
-            "format": "best[ext=mp4]/best",
+            "format": download_options["effective_format_selector"],
             "outtmpl": str(video_dir / "%(id)s.%(ext)s"),
             "noplaylist": True,
             "quiet": False,
             "no_warnings": False,
             "hls_prefer_native": True,
             "nopart": False,
+            "merge_output_format": "mp4",
         }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(video_url, download=True)
     except Exception as error:
-        base_report["error"] = error_payload(error)
+        message = str(error)
+        if "format" in message.lower() and "available" in message.lower():
+            resolution_error = TargetResolutionUnavailable(
+                "No downloadable format met min_video_height. "
+                "1080p acquisition is required unless fallback is explicitly allowed."
+            )
+            base_report["error"] = error_payload(resolution_error)
+            base_report["resolution_check"] = {
+                "status": "failed",
+                "message": str(resolution_error),
+                "target_height": download_options["target_video_height"],
+                "min_height": download_options["min_video_height"],
+                "actual_height": None,
+            }
+            base_report["warnings"] = [message]
+        else:
+            base_report["error"] = error_payload(error)
         write_json(report_path, base_report)
         return base_report, None
 
@@ -325,6 +663,35 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         write_json(report_path, base_report)
         return base_report, info
 
+    video_format = first_requested_video_format(info)
+    probe = probe_video_metadata(video_path)
+    warnings = []
+    if probe.get("warning"):
+        warnings.append(str(probe["warning"]))
+    probed_width = probe.get("width")
+    probed_height = probe.get("height")
+    info_width = video_format.get("width") or info.get("width")
+    info_height = video_format.get("height") or info.get("height")
+    downloaded_width = probed_width if probed_width is not None else info_width
+    downloaded_height = probed_height if probed_height is not None else info_height
+    try:
+        actual_height = int(downloaded_height) if downloaded_height is not None else None
+    except (TypeError, ValueError):
+        actual_height = None
+        warnings.append(f"Downloaded height was not numeric: {downloaded_height!r}")
+    check = resolution_check(
+        actual_height=actual_height,
+        target_height=int(download_options["target_video_height"]),
+        min_height=int(download_options["min_video_height"]),
+        allow_fallback=bool(download_options["allow_video_resolution_fallback"]),
+    )
+    filesize = video_path.stat().st_size if video_path.exists() else None
+    approx_filesize = (
+        video_format.get("filesize_approx")
+        or video_format.get("filesize")
+        or info.get("filesize_approx")
+        or info.get("filesize")
+    )
     report = {
         **base_report,
         "status": "success",
@@ -336,9 +703,28 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         "extractor": info.get("extractor"),
         "extractor_key": info.get("extractor_key"),
         "webpage_url": info.get("webpage_url") or video_url,
+        "downloaded_format_id": requested_format_id(info),
+        "downloaded_ext": video_path.suffix.lstrip(".") or info.get("ext"),
+        "downloaded_width": downloaded_width,
+        "downloaded_height": downloaded_height,
+        "downloaded_resolution": resolution_text(downloaded_width, downloaded_height),
+        "downloaded_vcodec": probe.get("vcodec") or video_format.get("vcodec"),
+        "downloaded_acodec": probe.get("acodec") or info.get("acodec"),
+        "downloaded_filesize": filesize,
+        "downloaded_filesize_approx": approx_filesize,
+        "resolution_check": check,
+        "warnings": sorted(set(warnings)),
         "error": None,
         "created_at": utc_now(),
     }
+    if check["status"] == "unknown":
+        error = DownloadedVideoResolutionUnknown(check["message"])
+        report["status"] = "failed"
+        report["error"] = error_payload(error)
+    elif check["status"] == "failed":
+        error = DownloadedVideoBelowMinimumResolution(check["message"])
+        report["status"] = "failed"
+        report["error"] = error_payload(error)
     write_json(report_path, report)
     return report, info
 
@@ -976,6 +1362,16 @@ def resolve_visual_options(
             DEFAULT_OCR_MIN_TEXT_LENGTH,
             "ocr_min_text_length",
         ),
+        "target_video_height": positive_int_or_default(
+            config.get("target_video_height"),
+            DEFAULT_TARGET_VIDEO_HEIGHT,
+            "target_video_height",
+        ),
+        "min_keyframe_height": positive_int_or_default(
+            config.get("min_keyframe_height"),
+            DEFAULT_MIN_KEYFRAME_HEIGHT,
+            "min_keyframe_height",
+        ),
     }
 
 
@@ -1161,7 +1557,7 @@ def crop_for_comparison(image: Any, region: dict[str, Any]) -> Any:
 
 
 def preflight_ffmpeg() -> dict[str, Any]:
-    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_path = find_executable("ffmpeg")
     if ffmpeg_path is None:
         raise FFmpegNotFound("ffmpeg was not found on PATH.")
 
@@ -1187,6 +1583,86 @@ def preflight_ffmpeg() -> dict[str, Any]:
     }
 
 
+def resolution_payload(width: Any, height: Any, warning: str | None = None) -> dict[str, Any]:
+    return {
+        "width": width,
+        "height": height,
+        "resolution": resolution_text(width, height),
+        "warning": warning,
+    }
+
+
+def image_file_resolution(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return resolution_payload(None, None, "No image path was available.")
+    try:
+        Image, _ImageStat = import_pillow()
+        with Image.open(path) as image:
+            width, height = image.size
+        return resolution_payload(width, height)
+    except Exception as error:
+        return resolution_payload(None, None, f"Could not read image resolution: {error}")
+
+
+def video_resolution_payload(video_path: Path | None) -> dict[str, Any]:
+    if video_path is None:
+        return resolution_payload(None, None, "No video path was available.")
+    metadata = probe_video_metadata(video_path)
+    return resolution_payload(
+        metadata.get("width"),
+        metadata.get("height"),
+        metadata.get("warning"),
+    )
+
+
+def keyframe_resolution_check(
+    keyframe_resolution: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    target_height = int(options.get("target_video_height") or DEFAULT_TARGET_VIDEO_HEIGHT)
+    min_height = int(options.get("min_keyframe_height") or DEFAULT_MIN_KEYFRAME_HEIGHT)
+    actual_height_raw = keyframe_resolution.get("height")
+    try:
+        actual_height = (
+            int(actual_height_raw) if actual_height_raw is not None else None
+        )
+    except (TypeError, ValueError):
+        actual_height = None
+    if actual_height is None:
+        return {
+            "status": "unknown",
+            "message": "Keyframe height could not be determined.",
+            "target_height": target_height,
+            "min_keyframe_height": min_height,
+            "actual_keyframe_height": None,
+            "warnings": [keyframe_resolution["warning"]]
+            if keyframe_resolution.get("warning")
+            else [],
+            "errors": [],
+        }
+    if actual_height >= min_height:
+        return {
+            "status": "success",
+            "message": "Keyframe height meets the configured minimum.",
+            "target_height": target_height,
+            "min_keyframe_height": min_height,
+            "actual_keyframe_height": actual_height,
+            "warnings": [],
+            "errors": [],
+        }
+    return {
+        "status": "failed",
+        "message": "Keyframe height is below min_keyframe_height.",
+        "target_height": target_height,
+        "min_keyframe_height": min_height,
+        "actual_keyframe_height": actual_height,
+        "warnings": [],
+        "errors": [
+            f"keyframe height {actual_height} is below required minimum {min_height}"
+        ],
+    }
+
+
 def frame_report_payload(
     run_id: str,
     video_path: str | None,
@@ -1202,6 +1678,7 @@ def frame_report_payload(
     selection_summary: dict[str, Any] | None = None,
     comparison_region: dict[str, Any] | None = None,
     ocr_report: dict[str, Any] | None = None,
+    resolution_report: dict[str, Any] | None = None,
     warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     ffmpeg_info = ffmpeg_info or {}
@@ -1245,6 +1722,31 @@ def frame_report_payload(
         warnings.append(str(comparison_region["warning"]))
     if ocr_report.get("warning"):
         warnings.append(str(ocr_report["warning"]))
+    resolution_report = resolution_report or {
+        "raw_video_resolution": resolution_payload(None, None, "not_evaluated"),
+        "extracted_frame_resolution": resolution_payload(None, None, "not_evaluated"),
+        "keyframe_resolution": resolution_payload(None, None, "not_evaluated"),
+        "resolution_check": {
+            "status": "unknown",
+            "message": "Resolution was not evaluated.",
+            "target_height": options.get("target_video_height"),
+            "min_keyframe_height": options.get("min_keyframe_height"),
+            "actual_keyframe_height": None,
+            "warnings": [],
+            "errors": [],
+        },
+    }
+    for item in (
+        resolution_report.get("raw_video_resolution"),
+        resolution_report.get("extracted_frame_resolution"),
+        resolution_report.get("keyframe_resolution"),
+    ):
+        if isinstance(item, dict) and item.get("warning"):
+            warnings.append(str(item["warning"]))
+    resolution_check_payload = resolution_report.get("resolution_check")
+    if isinstance(resolution_check_payload, dict):
+        for warning in resolution_check_payload.get("warnings") or []:
+            warnings.append(str(warning))
     return {
         "run_id": run_id,
         "video_path": video_path,
@@ -1277,6 +1779,12 @@ def frame_report_payload(
         "stable_segment_count": keyframe_selection.get("stable_segment_count"),
         "comparison_region": comparison_region,
         "ocr": ocr_report,
+        "raw_video_resolution": resolution_report.get("raw_video_resolution"),
+        "extracted_frame_resolution": resolution_report.get(
+            "extracted_frame_resolution"
+        ),
+        "keyframe_resolution": resolution_report.get("keyframe_resolution"),
+        "resolution_check": resolution_report.get("resolution_check"),
         "warnings": sorted(set(warnings)),
         "error": error_payload(error) if error is not None else None,
         "created_at": utc_now(),
@@ -2281,6 +2789,8 @@ def run_batch_3(
         "max_keyframes": max_keyframes_override or DEFAULT_MAX_KEYFRAMES,
         "min_visual_difference_score": DEFAULT_MIN_VISUAL_DIFFERENCE_SCORE,
         "min_stable_duration_seconds": DEFAULT_MIN_STABLE_DURATION_SECONDS,
+        "target_video_height": DEFAULT_TARGET_VIDEO_HEIGHT,
+        "min_keyframe_height": DEFAULT_MIN_KEYFRAME_HEIGHT,
     }
     video_path: Path | None = None
     video_path_text: str | None = None
@@ -2292,6 +2802,7 @@ def run_batch_3(
     keyframe_selection: dict[str, Any] | None = None
     comparison_region: dict[str, Any] | None = None
     ocr_report: dict[str, Any] | None = None
+    resolution_report: dict[str, Any] | None = None
     warnings: list[str] = []
 
     try:
@@ -2333,6 +2844,29 @@ def run_batch_3(
 
         video_path = strict_video_path_from_download_report(download_report)
         video_path_text = str(video_path)
+        raw_video_resolution = video_resolution_payload(video_path)
+        resolution_report = {
+            "raw_video_resolution": raw_video_resolution,
+            "extracted_frame_resolution": resolution_payload(
+                None,
+                None,
+                "Candidate frames have not been extracted.",
+            ),
+            "keyframe_resolution": resolution_payload(
+                None,
+                None,
+                "Keyframes have not been selected.",
+            ),
+            "resolution_check": {
+                "status": "unknown",
+                "message": "Keyframe resolution has not been evaluated.",
+                "target_height": options.get("target_video_height"),
+                "min_keyframe_height": options.get("min_keyframe_height"),
+                "actual_keyframe_height": None,
+                "warnings": [],
+                "errors": [],
+            },
+        }
 
         try:
             ffmpeg_info = preflight_ffmpeg()
@@ -2346,7 +2880,7 @@ def run_batch_3(
         except FFmpegPreflightFailed as error:
             ffmpeg_info = {
                 "available": True,
-                "path": shutil.which("ffmpeg"),
+                "path": find_executable("ffmpeg"),
                 "version": None,
             }
             raise error
@@ -2359,6 +2893,10 @@ def run_batch_3(
             smoke_seconds=options["smoke_seconds"],
         )
         frame_count = len(candidates)
+        first_candidate_path = Path(candidates[0]["path"]) if candidates else None
+        resolution_report["extracted_frame_resolution"] = image_file_resolution(
+            first_candidate_path
+        )
         selected_keyframes, quality_summary, keyframe_selection = select_keyframes(
             candidates,
             options,
@@ -2374,6 +2912,19 @@ def run_batch_3(
         if ocr_report.get("warning"):
             warnings.append(str(ocr_report["warning"]))
         keyframe_count = len(copied_keyframes)
+        first_keyframe_path = (
+            Path(copied_keyframes[0]["keyframe_path"]) if copied_keyframes else None
+        )
+        keyframe_resolution = image_file_resolution(first_keyframe_path)
+        resolution_report["keyframe_resolution"] = keyframe_resolution
+        resolution_report["resolution_check"] = keyframe_resolution_check(
+            keyframe_resolution,
+            options,
+        )
+        if resolution_report["resolution_check"]["status"] == "failed":
+            raise KeyframeResolutionBelowMinimum(
+                resolution_report["resolution_check"]["message"]
+            )
         segments = build_visual_segments(
             copied_keyframes,
             options,
@@ -2410,6 +2961,7 @@ def run_batch_3(
             },
             comparison_region=comparison_region,
             ocr_report=ocr_report,
+            resolution_report=resolution_report,
             warnings=warnings,
         )
         return run_dir, write_frame_report(run_dir, report)
@@ -2423,7 +2975,7 @@ def run_batch_3(
         elif isinstance(error, FFmpegPreflightFailed) and ffmpeg_info is None:
             ffmpeg_info = {
                 "available": True,
-                "path": shutil.which("ffmpeg"),
+                "path": find_executable("ffmpeg"),
                 "version": None,
             }
         if isinstance(error, NoAcceptableKeyframes):
@@ -2450,6 +3002,7 @@ def run_batch_3(
             },
             comparison_region=comparison_region,
             ocr_report=ocr_report,
+            resolution_report=resolution_report,
             warnings=warnings,
         )
         write_frame_report(run_dir, report)

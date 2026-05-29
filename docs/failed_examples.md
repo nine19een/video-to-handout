@@ -519,3 +519,45 @@ future rule:
 - Batch 4 只做可审计时间轴 alignment，不做语义理解。
 - Batch 4 不得自动调用 Batch 3.x full-video extraction；full-video visual evidence 是 Batch 4 的前置材料。
 - 无法匹配或低置信度的 transcript segment 必须在 `alignment.json` 中保留，不能静默丢弃。
+
+### Batch 4.5A 低分辨率视频不得作为讲义视觉证据
+
+failure name: Batch 4.5A visual evidence resolution below handout target
+
+stage: Batch 4.5A full-video visual evidence human gate
+
+run_id: batch2_test
+
+symptom:
+
+- full-run visual extraction 已生成 keyframes。
+- 人工看图发现 keyframe 文字明显模糊，不适合作为讲义视觉证据。
+- 只读诊断确认 raw video 为 `640x360`，keyframes 也为 `640x360`。
+- 旧 `download_report.json` 未记录 format id、width、height、resolution 或 requested format。
+
+why this is a problem:
+
+- 课程讲义中的截图需要支持学习者阅读画面文字。
+- 720p 或 360p 不能作为默认合格目标；当前项目固定以 1080p 作为视觉证据质量目标。
+- 如果下载报告不记录实际分辨率，后续 Batch 3/4 可能把低清素材误判为合格输入。
+
+root cause:
+
+- Batch 2 使用了容易选中低清 progressive stream 的 `best[ext=mp4]/best` selector。
+- 下载报告缺少 resolution diagnostics。
+- Batch 3 报告缺少 raw video、extracted frame 和 keyframe resolution 字段。
+
+fix:
+
+- Batch 2 默认使用 best video + best audio merge，优先满足 `target_video_height: 1080` 和 `min_video_height: 1080`。
+- 默认 `allow_video_resolution_fallback: false`。
+- 低于 `min_video_height` 的下载必须失败或标记为不可接受降级，不得伪装成功。
+- `download_report.json` 必须记录格式选择和实际下载分辨率。
+- `frame_report.json` 必须记录 raw video、extracted frame 和 keyframe resolution，并暴露 keyframe height 是否低于最低要求。
+
+future rule:
+
+- 讲义视觉证据默认目标是 1080p。
+- 不得为了 mp4 progressive stream 牺牲分辨率。
+- 分辨率不可确认时必须记录 unknown/warning/error，不得声称合格。
+- 全时段覆盖和过程性动画重复属于后续修复阶段，不应混入 resolution repair。
