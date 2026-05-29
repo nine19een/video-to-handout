@@ -299,38 +299,61 @@ Batch 3.x 验收时仍需检查 Batch 4 / Batch 5 产物不存在，并确认 `c
 
 建议新开 Codex App thread。
 
-## Batch 4：对齐与内容索引
+## Batch 4：Transcript ↔ Visual Alignment
+
+### 状态
+
+已进入实现阶段，完成后等待独立验收 Agent 复核。
 
 ### 目标
 
-从时间线材料转换到知识结构。
+把正式 `raw_transcript.json` 中的字幕时间轴，与正式 `visual_segments.json` / keyframes 中的视觉时间轴对齐，生成可审计的：
+
+- `outputs/<run_id>/audit/alignment.json`
 
 ### 包含内容
 
 - alignment.json
-- content_map.json
-- 可选 handout_outline_draft.md
+- transcript segment 与 visual segment 的时间重叠匹配
+- 无重叠时的最近 visual segment 低置信度匹配
+- unaligned transcript segment 记录
+- coverage、gap、warnings 和 errors 统计
 
 ### 不包含内容
 
-- 不直接生成最终讲义
-- 不机械复制 transcript
-- 不把每个视觉段落直接变成一个章节
+- 不生成 content_map.json
+- 不生成 review_report.md
+- 不生成 lecture_handout.md
+- 不做中文讲义或最终学习笔记
+- 不声称完成语义理解
+
+### 前置条件
+
+- `outputs/<run_id>/audit/raw_transcript.json` 必须存在且包含带 `start`、`end`、`text` 的 segments。
+- `outputs/<run_id>/audit/visual_segments.json` 必须存在且为正式 `status: success`。
+- `outputs/<run_id>/audit/frame_report.json` 必须存在且 `smoke_test` 不得为 `true`。
+- `outputs/<run_id>/assets/keyframes/` 中被 visual segment 引用的 keyframe 文件必须存在。
+- visual coverage 必须足够接近 transcript coverage；180 秒 smoke visual evidence 不得用于整节课正式 alignment。
 
 ### 验收门
 
 - 字幕片段能回溯到视频时间
 - 关键画面能回溯到视频时间
-- content_map 能表达主题归并
-- 同一主题的多个片段可以合并
-- 过渡内容不会被当成正式知识点
-- 内容索引不是简单时间线切片
+- `alignment.json` 是合法 JSON
+- 每个 alignment item 包含 transcript id / index、transcript start/end/text、matched visual id、visual start/end、keyframe_path、source_frame_time、match_reason、overlap_seconds 或 distance_seconds、confidence 和 quality_flags
+- smoke visual evidence 会被拒绝，且失败报告可诊断
+- visual coverage 明显不足时不得伪装成功
+- unaligned transcript segment 不被静默丢弃
+- Batch 4 不得生成 Batch 5 产物：
+  - `outputs/<run_id>/audit/content_map.json`
+  - `outputs/<run_id>/audit/review_report.md`
+  - `outputs/<run_id>/lecture_handout.md`
 
 ### Agent 使用
 
 建议新开 Codex App thread。
 
-## Batch 5：讲义生成与工程报告
+## Batch 5：内容索引、讲义生成与工程报告
 
 ### 目标
 
@@ -338,6 +361,7 @@ Batch 3.x 验收时仍需检查 Batch 4 / Batch 5 产物不存在，并确认 `c
 
 ### 包含内容
 
+- audit/content_map.json
 - lecture_handout.md
 - audit/review_report.md
 
@@ -518,7 +542,7 @@ Batch 3.x 已完成并通过独立验收 Agent 和人工看图验收。该结论
 - all-rejected quality filtering 失败路径保留 rejected stats
 - JSON 合法性、Batch 4/5 越界检查、sample config placeholder 和 Git hygiene
 
-Batch 4 的前置条件已满足：后续可以使用已验收的 `outputs/<run_id>/audit/visual_segments.json` 和 `outputs/<run_id>/assets/keyframes/` 作为视觉输入。
+Batch 4 的代码能力前置条件已满足：后续可以使用已验收的 `outputs/<run_id>/audit/visual_segments.json` 和 `outputs/<run_id>/assets/keyframes/` 作为视觉输入。但具体 run 仍必须通过 Batch 4 preflight；smoke visual evidence 或 coverage 明显不足的 run 不得作为正式 alignment 输入。
 
 Batch 4 尚未开始。Batch 3.x Solidify 不得生成：
 

@@ -37,6 +37,9 @@ DEFAULT_OCR_MAX_CHARS = 500
 DEFAULT_OCR_MIN_TEXT_LENGTH = 4
 SUBTITLE_SUFFIXES = {".vtt", ".srt"}
 VISUAL_EXTRACTION_METHOD = "ffmpeg_interval_plus_pillow_difference_v1"
+ALIGNMENT_METHOD = "transcript_visual_time_alignment_v1"
+MIN_VISUAL_TRANSCRIPT_COVERAGE_RATIO = 0.8
+NEAREST_VISUAL_MATCH_MAX_DISTANCE_SECONDS = 30.0
 
 
 class FFmpegNotFound(RuntimeError):
@@ -73,6 +76,42 @@ class NoAcceptableKeyframes(RuntimeError):
         self.keyframe_selection = keyframe_selection
         self.comparison_region = comparison_region
         self.warnings = warnings or []
+
+
+class MissingRawTranscript(RuntimeError):
+    pass
+
+
+class MissingVisualSegments(RuntimeError):
+    pass
+
+
+class MissingFrameReport(RuntimeError):
+    pass
+
+
+class VisualEvidenceIsSmoke(RuntimeError):
+    pass
+
+
+class VisualCoverageTooShort(RuntimeError):
+    pass
+
+
+class InvalidTranscriptSegment(RuntimeError):
+    pass
+
+
+class InvalidVisualSegment(RuntimeError):
+    pass
+
+
+class MissingKeyframeFile(RuntimeError):
+    pass
+
+
+class InvalidTimeline(RuntimeError):
+    pass
 
 
 def utc_now() -> str:
@@ -152,7 +191,7 @@ def write_json(path: Path, payload: dict[str, Any]) -> None:
 
 
 def read_json(path: Path) -> dict[str, Any]:
-    with path.open("r", encoding="utf-8") as file:
+    with path.open("r", encoding="utf-8-sig") as file:
         payload = json.load(file)
     if not isinstance(payload, dict):
         raise ValueError(f"Expected JSON object in {path}.")
@@ -2428,6 +2467,401 @@ def run_batch_3(
         return run_dir, report
 
 
+def alignment_input_paths(run_dir: Path) -> dict[str, str]:
+    return {
+        "raw_transcript_path": str(run_dir / "audit" / "raw_transcript.json"),
+        "visual_segments_path": str(run_dir / "audit" / "visual_segments.json"),
+        "frame_report_path": str(run_dir / "audit" / "frame_report.json"),
+        "keyframe_dir": str(run_dir / "assets" / "keyframes"),
+    }
+
+
+def alignment_report_payload(
+    run_id: str,
+    status: str,
+    inputs: dict[str, str],
+    transcript_count: int = 0,
+    visual_count: int = 0,
+    aligned_count: int = 0,
+    unaligned_count: int = 0,
+    low_confidence_count: int = 0,
+    coverage: dict[str, Any] | None = None,
+    gap_summary: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+    errors: list[dict[str, str]] | None = None,
+    alignments: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    errors = errors or []
+    return {
+        "run_id": run_id,
+        "status": status,
+        "created_at": utc_now(),
+        "method": ALIGNMENT_METHOD,
+        "inputs": inputs,
+        "transcript_segment_count": transcript_count,
+        "visual_segment_count": visual_count,
+        "aligned_segment_count": aligned_count,
+        "unaligned_segment_count": unaligned_count,
+        "low_confidence_segment_count": low_confidence_count,
+        "coverage": coverage or {},
+        "gap_summary": gap_summary or {},
+        "warnings": warnings or [],
+        "errors": errors,
+        "error": errors[0] if errors else None,
+        "alignments": alignments or [],
+    }
+
+
+def write_alignment_report(run_dir: Path, report: dict[str, Any]) -> dict[str, Any]:
+    write_json(run_dir / "audit" / "alignment.json", report)
+    return report
+
+
+def failed_alignment_report(
+    run_dir: Path,
+    run_id: str,
+    inputs: dict[str, str],
+    error: BaseException,
+    transcript_count: int = 0,
+    visual_count: int = 0,
+    coverage: dict[str, Any] | None = None,
+    gap_summary: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
+) -> dict[str, Any]:
+    report = alignment_report_payload(
+        run_id=run_id,
+        status="failed",
+        inputs=inputs,
+        transcript_count=transcript_count,
+        visual_count=visual_count,
+        coverage=coverage,
+        gap_summary=gap_summary,
+        warnings=warnings,
+        errors=[error_payload(error)],
+        alignments=[],
+    )
+    return write_alignment_report(run_dir, report)
+
+
+def required_json_file(path: Path, error_type: type[RuntimeError]) -> dict[str, Any]:
+    if not path.exists():
+        raise error_type(f"Missing required Batch 4 input: {path}")
+    return read_json(path)
+
+
+def numeric_field(value: Any, field_name: str, error_type: type[RuntimeError]) -> float:
+    if isinstance(value, bool) or value is None or value == "":
+        raise error_type(f"Missing numeric field `{field_name}`.")
+    try:
+        return float(value)
+    except (TypeError, ValueError) as error:
+        raise error_type(f"Invalid numeric field `{field_name}`: {value!r}") from error
+
+
+def normalize_transcript_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise InvalidTranscriptSegment("raw_transcript.json must contain non-empty segments.")
+
+    segments: list[dict[str, Any]] = []
+    for index, segment in enumerate(raw_segments):
+        if not isinstance(segment, dict):
+            raise InvalidTranscriptSegment(f"Transcript segment {index} is not an object.")
+        start = numeric_field(segment.get("start"), "start", InvalidTranscriptSegment)
+        end = numeric_field(segment.get("end"), "end", InvalidTranscriptSegment)
+        if start >= end:
+            raise InvalidTimeline(
+                f"Transcript segment {index} has start >= end: {start} >= {end}."
+            )
+        text = optional_string(segment.get("text"))
+        if text is None:
+            raise InvalidTranscriptSegment(f"Transcript segment {index} has no text.")
+        segments.append(
+            {
+                "id": segment.get("id") or index + 1,
+                "index": index,
+                "start": start,
+                "end": end,
+                "text": text,
+            }
+        )
+    return segments
+
+
+def normalize_visual_segments(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_segments = payload.get("segments")
+    if not isinstance(raw_segments, list) or not raw_segments:
+        raise InvalidVisualSegment("visual_segments.json must contain non-empty segments.")
+
+    segments: list[dict[str, Any]] = []
+    for index, segment in enumerate(raw_segments):
+        if not isinstance(segment, dict):
+            raise InvalidVisualSegment(f"Visual segment {index} is not an object.")
+        start = numeric_field(segment.get("start"), "start", InvalidVisualSegment)
+        end = numeric_field(segment.get("end"), "end", InvalidVisualSegment)
+        if start >= end:
+            raise InvalidTimeline(
+                f"Visual segment {index} has start >= end: {start} >= {end}."
+            )
+        keyframe_text = optional_string(segment.get("keyframe_path"))
+        if keyframe_text is None:
+            raise InvalidVisualSegment(f"Visual segment {index} has no keyframe_path.")
+        keyframe_path = Path(keyframe_text)
+        if not keyframe_path.exists():
+            raise MissingKeyframeFile(f"Keyframe file not found: {keyframe_path}")
+        source_frame_time_value = segment.get("source_frame_time")
+        if source_frame_time_value is None or source_frame_time_value == "":
+            source_frame_time_value = start
+        source_frame_time = numeric_field(
+            source_frame_time_value,
+            "source_frame_time",
+            InvalidVisualSegment,
+        )
+        segments.append(
+            {
+                "id": segment.get("id") or index + 1,
+                "index": index,
+                "start": start,
+                "end": end,
+                "keyframe_path": keyframe_text,
+                "source_frame_time": source_frame_time,
+            }
+        )
+    return segments
+
+
+def timeline_coverage(
+    transcript_segments: list[dict[str, Any]],
+    visual_segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    transcript_start = min(float(segment["start"]) for segment in transcript_segments)
+    transcript_end = max(float(segment["end"]) for segment in transcript_segments)
+    visual_start = min(float(segment["start"]) for segment in visual_segments)
+    visual_end = max(float(segment["end"]) for segment in visual_segments)
+    transcript_duration = max(0.0, transcript_end - transcript_start)
+    visual_duration = max(0.0, visual_end - visual_start)
+    end_ratio = visual_end / transcript_end if transcript_end > 0 else None
+    duration_ratio = (
+        visual_duration / transcript_duration if transcript_duration > 0 else None
+    )
+    return {
+        "transcript_start": round(transcript_start, 3),
+        "transcript_end": round(transcript_end, 3),
+        "visual_start": round(visual_start, 3),
+        "visual_end": round(visual_end, 3),
+        "visual_to_transcript_end_ratio": (
+            round(end_ratio, 6) if end_ratio is not None else None
+        ),
+        "visual_to_transcript_duration_ratio": (
+            round(duration_ratio, 6) if duration_ratio is not None else None
+        ),
+        "transcript_duration_seconds": round(transcript_duration, 3),
+        "visual_duration_seconds": round(visual_duration, 3),
+    }
+
+
+def gap_summary(
+    transcript_segments: list[dict[str, Any]],
+    visual_segments: list[dict[str, Any]],
+) -> dict[str, Any]:
+    def summarize(segments: list[dict[str, Any]]) -> tuple[int, float]:
+        sorted_segments = sorted(segments, key=lambda item: float(item["start"]))
+        gaps = []
+        for previous, current in zip(sorted_segments, sorted_segments[1:]):
+            gap = float(current["start"]) - float(previous["end"])
+            if gap > 0.001:
+                gaps.append(gap)
+        return len(gaps), round(max(gaps), 3) if gaps else 0.0
+
+    transcript_gap_count, largest_transcript_gap = summarize(transcript_segments)
+    visual_gap_count, largest_visual_gap = summarize(visual_segments)
+    return {
+        "transcript_gap_count": transcript_gap_count,
+        "visual_gap_count": visual_gap_count,
+        "largest_transcript_gap_seconds": largest_transcript_gap,
+        "largest_visual_gap_seconds": largest_visual_gap,
+    }
+
+
+def overlap_seconds(left: dict[str, Any], right: dict[str, Any]) -> float:
+    return max(0.0, min(float(left["end"]), float(right["end"])) - max(float(left["start"]), float(right["start"])))
+
+
+def distance_seconds(transcript: dict[str, Any], visual: dict[str, Any]) -> float:
+    transcript_start = float(transcript["start"])
+    transcript_end = float(transcript["end"])
+    visual_start = float(visual["start"])
+    visual_end = float(visual["end"])
+    if transcript_end < visual_start:
+        boundary_distance = visual_start - transcript_end
+    elif visual_end < transcript_start:
+        boundary_distance = transcript_start - visual_end
+    else:
+        boundary_distance = 0.0
+    transcript_midpoint = (transcript_start + transcript_end) / 2
+    source_distance = abs(transcript_midpoint - float(visual["source_frame_time"]))
+    return min(boundary_distance, source_distance)
+
+
+def build_alignment_items(
+    transcript_segments: list[dict[str, Any]],
+    visual_segments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    alignments = []
+    for transcript in transcript_segments:
+        overlaps = [
+            (overlap_seconds(transcript, visual), visual)
+            for visual in visual_segments
+        ]
+        best_overlap, best_visual = max(overlaps, key=lambda item: item[0])
+        if best_overlap > 0:
+            transcript_duration = float(transcript["end"]) - float(transcript["start"])
+            overlap_ratio = best_overlap / transcript_duration if transcript_duration > 0 else 0.0
+            confidence = "high" if overlap_ratio >= 0.5 else "medium"
+            match_reason = "time_overlap"
+            distance = 0.0
+            quality_flags: list[str] = []
+        else:
+            distance, best_visual = min(
+                (
+                    distance_seconds(transcript, visual),
+                    visual,
+                )
+                for visual in visual_segments
+            )
+            best_overlap = 0.0
+            if distance <= NEAREST_VISUAL_MATCH_MAX_DISTANCE_SECONDS:
+                confidence = "low"
+                match_reason = "nearest_visual_segment"
+                quality_flags = ["no_time_overlap"]
+            else:
+                alignments.append(
+                    {
+                        "transcript_segment_id": transcript["id"],
+                        "transcript_index": transcript["index"],
+                        "transcript_start": round(float(transcript["start"]), 3),
+                        "transcript_end": round(float(transcript["end"]), 3),
+                        "transcript_text": transcript["text"],
+                        "matched_visual_segment_id": None,
+                        "visual_start": None,
+                        "visual_end": None,
+                        "keyframe_path": None,
+                        "source_frame_time": None,
+                        "match_reason": "unaligned",
+                        "overlap_seconds": 0.0,
+                        "distance_seconds": round(distance, 3),
+                        "confidence": "none",
+                        "quality_flags": ["no_visual_segment_match"],
+                    }
+                )
+                continue
+
+        alignments.append(
+            {
+                "transcript_segment_id": transcript["id"],
+                "transcript_index": transcript["index"],
+                "transcript_start": round(float(transcript["start"]), 3),
+                "transcript_end": round(float(transcript["end"]), 3),
+                "transcript_text": transcript["text"],
+                "matched_visual_segment_id": best_visual["id"],
+                "visual_start": round(float(best_visual["start"]), 3),
+                "visual_end": round(float(best_visual["end"]), 3),
+                "keyframe_path": best_visual["keyframe_path"],
+                "source_frame_time": round(float(best_visual["source_frame_time"]), 3),
+                "match_reason": match_reason,
+                "overlap_seconds": round(best_overlap, 3),
+                "distance_seconds": round(distance, 3),
+                "confidence": confidence,
+                "quality_flags": quality_flags,
+            }
+        )
+    return alignments
+
+
+def run_batch_4(config_path: Path) -> tuple[Path, dict[str, Any]]:
+    config = load_config(config_path.resolve())
+    run_id = validate_run_id(str(config["run_id"]))
+    run_dir = configured_run_dir(config)
+    audit_dir = run_dir / "audit"
+    audit_dir.mkdir(parents=True, exist_ok=True)
+    inputs = alignment_input_paths(run_dir)
+    transcript_segments: list[dict[str, Any]] = []
+    visual_segments: list[dict[str, Any]] = []
+    coverage: dict[str, Any] | None = None
+    gaps: dict[str, Any] | None = None
+
+    try:
+        raw_transcript_path = Path(inputs["raw_transcript_path"])
+        visual_segments_path = Path(inputs["visual_segments_path"])
+        frame_report_path = Path(inputs["frame_report_path"])
+
+        raw_transcript = required_json_file(raw_transcript_path, MissingRawTranscript)
+        visual_payload = required_json_file(visual_segments_path, MissingVisualSegments)
+        frame_report = required_json_file(frame_report_path, MissingFrameReport)
+
+        transcript_segments = normalize_transcript_segments(raw_transcript)
+        visual_segments = normalize_visual_segments(visual_payload)
+        coverage = timeline_coverage(transcript_segments, visual_segments)
+        gaps = gap_summary(transcript_segments, visual_segments)
+
+        if frame_report.get("smoke_test") is True:
+            raise VisualEvidenceIsSmoke(
+                "frame_report.json is smoke visual evidence. "
+                "Materialize full-video visual evidence before Batch 4 alignment."
+            )
+        if visual_payload.get("status") == "smoke_success":
+            raise VisualEvidenceIsSmoke(
+                "visual_segments.json has status smoke_success. "
+                "Materialize full-video visual evidence before Batch 4 alignment."
+            )
+        if visual_payload.get("status") != "success":
+            raise InvalidVisualSegment(
+                "visual_segments.json status must be success for Batch 4 alignment."
+            )
+
+        ratio = coverage.get("visual_to_transcript_end_ratio")
+        if ratio is not None and float(ratio) < MIN_VISUAL_TRANSCRIPT_COVERAGE_RATIO:
+            raise VisualCoverageTooShort(
+                "visual_segments.json coverage is too short for the transcript timeline. "
+                "Materialize full-video visual evidence before Batch 4 alignment."
+            )
+
+        alignments = build_alignment_items(transcript_segments, visual_segments)
+        unaligned_count = sum(
+            1 for item in alignments if item["confidence"] == "none"
+        )
+        low_confidence_count = sum(
+            1 for item in alignments if item["confidence"] == "low"
+        )
+        report = alignment_report_payload(
+            run_id=run_id,
+            status="success",
+            inputs=inputs,
+            transcript_count=len(transcript_segments),
+            visual_count=len(visual_segments),
+            aligned_count=len(alignments) - unaligned_count,
+            unaligned_count=unaligned_count,
+            low_confidence_count=low_confidence_count,
+            coverage=coverage,
+            gap_summary=gaps,
+            warnings=[],
+            errors=[],
+            alignments=alignments,
+        )
+        return run_dir, write_alignment_report(run_dir, report)
+    except Exception as error:
+        return run_dir, failed_alignment_report(
+            run_dir=run_dir,
+            run_id=run_id,
+            inputs=inputs,
+            error=error,
+            transcript_count=len(transcript_segments),
+            visual_count=len(visual_segments),
+            coverage=coverage,
+            gap_summary=gaps,
+        )
+
+
 def run_batch_2(config_path: Path) -> tuple[Path, dict[str, Any]]:
     config, run_dir = initialize_run(config_path)
     download_report, video_info = download_video(config, run_dir)
@@ -2465,6 +2899,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--extract-visuals-only",
         action="store_true",
         help="Run only Batch 3 visual evidence extraction.",
+    )
+    parser.add_argument(
+        "--align-transcript-visuals-only",
+        action="store_true",
+        help="Run only Batch 4 transcript to visual evidence alignment.",
     )
     parser.add_argument(
         "--frame-interval-seconds",
@@ -2506,6 +2945,13 @@ def main() -> None:
         )
     if args.extract_visuals_only and args.transcribe_fallback_only:
         parser.error("--extract-visuals-only cannot be combined with --transcribe-fallback-only.")
+    if args.align_transcript_visuals_only and (
+        args.extract_visuals_only or args.transcribe_fallback_only
+    ):
+        parser.error(
+            "--align-transcript-visuals-only cannot be combined with "
+            "--extract-visuals-only or --transcribe-fallback-only."
+        )
 
     if args.extract_visuals_only:
         run_dir, frame_report = run_batch_3(
@@ -2516,6 +2962,13 @@ def main() -> None:
         )
         print(f"Batch 3 output directory: {run_dir}")
         if frame_report["status"] == "failed":
+            raise SystemExit(1)
+        return
+
+    if args.align_transcript_visuals_only:
+        run_dir, alignment_report = run_batch_4(Path(args.config))
+        print(f"Batch 4 output directory: {run_dir}")
+        if alignment_report["status"] == "failed":
             raise SystemExit(1)
         return
 

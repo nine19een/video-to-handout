@@ -408,12 +408,19 @@ Batch 2.5 规则：
 - 将字幕片段分配到视觉段落中
 - 生成 audit/alignment.json
 - alignment.json 应保留时间戳、关键画面路径、字幕片段和来源信息
+- Batch 4 只做 transcript ↔ visual alignment，不生成 content_map、review_report 或 lecture_handout
+- alignment 首版是可审计的时间轴对齐，不代表语义级课程理解
+- 正式 alignment 不得使用 smoke visual evidence；如果 `frame_report.json` 中 `smoke_test: true` 或 `visual_segments.json` 中 `status: smoke_success`，必须失败并写明原因
+- raw transcript 与 visual coverage 明显不一致时，必须拒绝正式 alignment，要求先生成 full-video visual evidence
+- 无法匹配或低置信度的 transcript segment 必须保留在 alignment.json 中，不得静默丢弃
 
 不得：
 
 - 只因为页数接近就认为对齐正确
 - 让 alignment.json 缺少回溯字段
 - 将工程置信度写入最终讲义
+- 将 smoke visual_segments 当作整节课正式对齐输入
+- 在 Batch 4 生成中文讲义、内容索引或工程验收报告
 
 ### 内容索引阶段
 

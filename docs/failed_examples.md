@@ -482,3 +482,40 @@ expected behavior:
 - `rejected_frame_count` 必须反映真实被拒绝帧数。
 - `rejected_reasons`、`quality_checks` 和 `keyframe_selection` 必须保留可诊断信息。
 - `visual_segments.json` 如写出，应为 failed + `segments: []`，并尽量带上同一批 quality / selection summary。
+
+### Batch 4 smoke visual evidence 不得作为正式 alignment 输入
+
+failure name: smoke visual evidence must not be used for full transcript alignment
+
+stage: Batch 4 transcript ↔ visual alignment
+
+risk:
+
+- Batch 3 smoke visual evidence 只覆盖视频前若干秒，用于验证视觉证据提取链路。
+- 如果 Batch 4 把 `status: smoke_success` 的 `visual_segments.json` 或 `smoke_test: true` 的 `frame_report.json` 当作整节课正式输入，大部分 transcript 会被错误对齐、低质量对齐或静默丢弃。
+- coverage 明显短于 transcript coverage 时，即使文件存在，也不能判定 alignment 成功。
+
+wrong behavior to avoid:
+
+- 只因为 `raw_transcript.json`、`visual_segments.json` 和 keyframe 文件存在就生成 `status: success` 的 `alignment.json`。
+- 用 180 秒 smoke visual segments 对齐完整长视频 transcript。
+- 对 coverage 不足的 transcript segment 静默丢弃。
+- 生成 content_map、review_report 或 lecture_handout 来掩盖 alignment 输入不合格。
+
+expected behavior:
+
+- Batch 4 必须检查 `frame_report.json` 中的 `smoke_test`。
+- Batch 4 必须检查 `visual_segments.json` 中的 `status`。
+- Batch 4 必须比较 visual coverage 与 transcript coverage。
+- 如果发现 smoke visual evidence 或 coverage 明显不足，应写出可诊断的 `alignment.json`：
+  - `status: failed`
+  - `alignments: []`
+  - `errors` 包含 `VisualEvidenceIsSmoke` 或 `VisualCoverageTooShort`
+  - 错误信息说明需要先生成 full-video visual evidence
+- 失败 JSON 必须能通过 `python -m json.tool` 验证。
+
+future rule:
+
+- Batch 4 只做可审计时间轴 alignment，不做语义理解。
+- Batch 4 不得自动调用 Batch 3.x full-video extraction；full-video visual evidence 是 Batch 4 的前置材料。
+- 无法匹配或低置信度的 transcript segment 必须在 `alignment.json` 中保留，不能静默丢弃。
