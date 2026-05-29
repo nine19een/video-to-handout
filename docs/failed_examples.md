@@ -373,7 +373,8 @@ future rule:
 
 - FFmpeg 是系统依赖，必须通过 preflight 检查。
 - FFmpeg 缺失是明确失败，不是 skip，也不是 smoke success。
-- 失败路径下可以创建空目录，但不能生成伪 keyframe，不能过度声称视觉证据已提取成功。
+- Batch 3 重新处理某个 run 时，应清理该 run 下由本流程生成的旧候选帧和旧 keyframe 文件。否则 FFmpeg 缺失或抽帧失败后，目录中的历史图片可能被误认为本轮成功产物。
+- 失败路径下可以创建空目录，但不能生成或保留会被误判为本轮成功产物的伪 keyframe，不能过度声称视觉证据已提取成功。
 
 ### Batch 3 Pillow 未安装导致 keyframe 选择失败
 

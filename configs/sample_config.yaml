@@ -17,3 +17,20 @@ frame_smoke_seconds:
 max_keyframes: 30
 min_visual_difference_score: 0.12
 min_stable_duration_seconds: 20
+min_frame_variance: 2.0
+min_sharpness_score: 1.5
+dark_frame_mean_threshold: 5
+bright_frame_mean_threshold: 250
+solid_frame_variance_threshold: 2
+duplicate_similarity_threshold: 0.92
+duplicate_hash_distance_threshold: 0.08
+comparison_region_mode: "full_frame"
+comparison_center_crop_percent: 1.0
+comparison_crop_left:
+comparison_crop_top:
+comparison_crop_right:
+comparison_crop_bottom:
+ocr_backend: "none"
+ocr_language:
+ocr_max_chars: 500
+ocr_min_text_length: 4

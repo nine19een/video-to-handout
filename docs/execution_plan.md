@@ -272,7 +272,9 @@ Test-Path outputs\<run_id>\lecture_handout.md
 
 ### Batch 3.1 / 3.x 候选方向
 
-后续可以单独规划 Batch 3.1 或 Batch 3.x，但不应把以下方向视为 Batch 3 已完成能力：
+Batch 3.x 的目标是在不进入 Batch 4 的前提下提升视觉证据质量。它仍然只是视觉证据提取，不是语义级视觉理解。
+
+Batch 3.x 可以包含：
 
 - 重复 slide 抑制
 - 黑屏、白屏、转场、模糊帧过滤增强
@@ -280,6 +282,18 @@ Test-Path outputs\<run_id>\lecture_handout.md
 - slide-aware crop / region comparison
 - OCR 或 slide title 辅助
 - 多视频类型 profile 支持
+
+Batch 3.x 的当前可验收范围：
+
+- 3.1 坏帧过滤：记录 `quality_checks`、`accepted_frame_count`、`rejected_frame_count`、`rejected_reasons` 和质量阈值。所有候选帧都被拒绝时必须失败，不得伪造 keyframe。
+- 3.2 重复抑制与稳定段合并：记录 `keyframe_selection`、`duplicate_suppressed_count`、`duplicate_rejected_count`、`difference_accepted_count`、`quality_rejected_count`、`stable_segment_count`。keyframe 数量变少不是单独失败依据，但必须可解释。
+- 3.3 区域比较：默认 `comparison_region_mode: "full_frame"`；center crop 或 manual crop 只影响差异评分区域，输出 keyframe 仍是完整原图；非法 crop 回退 full frame 并记录 warning。
+- 3.4 OCR / 文字线索：默认 `ocr_backend: "none"`；OCR 只是安全降级 hook，不是成功条件，不应引入必需系统依赖，也不应污染讲义。
+
+Batch 3.x 验收时仍需检查 Batch 4 / Batch 5 产物不存在，并确认 `configs/sample_config.yaml` 保持 placeholder：
+
+- `video_url: "https://example.com/public-lecture-video"`
+- `run_id: "sample_run"`
 
 ### Agent 使用
 

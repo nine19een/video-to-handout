@@ -23,6 +23,18 @@ DEFAULT_FRAME_INTERVAL_SECONDS = 10.0
 DEFAULT_MAX_KEYFRAMES = 30
 DEFAULT_MIN_VISUAL_DIFFERENCE_SCORE = 0.12
 DEFAULT_MIN_STABLE_DURATION_SECONDS = 20.0
+DEFAULT_MIN_FRAME_VARIANCE = 2.0
+DEFAULT_MIN_SHARPNESS_SCORE = 1.5
+DEFAULT_DARK_FRAME_MEAN_THRESHOLD = 5.0
+DEFAULT_BRIGHT_FRAME_MEAN_THRESHOLD = 250.0
+DEFAULT_SOLID_FRAME_VARIANCE_THRESHOLD = 2.0
+DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD = 0.92
+DEFAULT_DUPLICATE_HASH_DISTANCE_THRESHOLD = 0.08
+DEFAULT_COMPARISON_REGION_MODE = "full_frame"
+DEFAULT_COMPARISON_CENTER_CROP_PERCENT = 1.0
+DEFAULT_OCR_BACKEND = "none"
+DEFAULT_OCR_MAX_CHARS = 500
+DEFAULT_OCR_MIN_TEXT_LENGTH = 4
 SUBTITLE_SUFFIXES = {".vtt", ".srt"}
 VISUAL_EXTRACTION_METHOD = "ffmpeg_interval_plus_pillow_difference_v1"
 
@@ -48,7 +60,19 @@ class PillowFrameReadFailed(RuntimeError):
 
 
 class NoAcceptableKeyframes(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        quality_summary: dict[str, Any] | None = None,
+        keyframe_selection: dict[str, Any] | None = None,
+        comparison_region: dict[str, Any] | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.quality_summary = quality_summary
+        self.keyframe_selection = keyframe_selection
+        self.comparison_region = comparison_region
+        self.warnings = warnings or []
 
 
 def utc_now() -> str:
@@ -83,7 +107,7 @@ def load_config(config_path: Path) -> dict[str, Any]:
             if ":" not in stripped:
                 raise ValueError(f"Invalid config line {line_number}: {line.rstrip()}")
             key, value = stripped.split(":", 1)
-            key = key.strip()
+            key = key.strip().lstrip("\ufeff")
             if not key:
                 raise ValueError(f"Invalid empty config key on line {line_number}.")
             config[key] = parse_scalar(value)
@@ -681,6 +705,17 @@ def positive_int_or_default(value: Any, default: int, field_name: str) -> int:
     return number
 
 
+def optional_float(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    return float(value)
+
+
+def string_or_default(value: Any, default: str) -> str:
+    normalized = optional_string(value)
+    return normalized if normalized is not None else default
+
+
 def configured_run_dir(config: dict[str, Any]) -> Path:
     run_id = validate_run_id(str(config["run_id"]))
     output_dir = Path(str(config["output_dir"]).strip())
@@ -842,6 +877,66 @@ def resolve_visual_options(
             DEFAULT_MIN_STABLE_DURATION_SECONDS,
             "min_stable_duration_seconds",
         ),
+        "min_frame_variance": nonnegative_float_or_default(
+            config.get("min_frame_variance"),
+            DEFAULT_MIN_FRAME_VARIANCE,
+            "min_frame_variance",
+        ),
+        "min_sharpness_score": nonnegative_float_or_default(
+            config.get("min_sharpness_score"),
+            DEFAULT_MIN_SHARPNESS_SCORE,
+            "min_sharpness_score",
+        ),
+        "dark_frame_mean_threshold": nonnegative_float_or_default(
+            config.get("dark_frame_mean_threshold"),
+            DEFAULT_DARK_FRAME_MEAN_THRESHOLD,
+            "dark_frame_mean_threshold",
+        ),
+        "bright_frame_mean_threshold": nonnegative_float_or_default(
+            config.get("bright_frame_mean_threshold"),
+            DEFAULT_BRIGHT_FRAME_MEAN_THRESHOLD,
+            "bright_frame_mean_threshold",
+        ),
+        "solid_frame_variance_threshold": nonnegative_float_or_default(
+            config.get("solid_frame_variance_threshold"),
+            DEFAULT_SOLID_FRAME_VARIANCE_THRESHOLD,
+            "solid_frame_variance_threshold",
+        ),
+        "duplicate_similarity_threshold": nonnegative_float_or_default(
+            config.get("duplicate_similarity_threshold"),
+            DEFAULT_DUPLICATE_SIMILARITY_THRESHOLD,
+            "duplicate_similarity_threshold",
+        ),
+        "duplicate_hash_distance_threshold": nonnegative_float_or_default(
+            config.get("duplicate_hash_distance_threshold"),
+            DEFAULT_DUPLICATE_HASH_DISTANCE_THRESHOLD,
+            "duplicate_hash_distance_threshold",
+        ),
+        "comparison_region_mode": string_or_default(
+            config.get("comparison_region_mode"),
+            DEFAULT_COMPARISON_REGION_MODE,
+        ),
+        "comparison_center_crop_percent": positive_float_or_default(
+            config.get("comparison_center_crop_percent"),
+            DEFAULT_COMPARISON_CENTER_CROP_PERCENT,
+            "comparison_center_crop_percent",
+        ),
+        "comparison_crop_left": optional_float(config.get("comparison_crop_left")),
+        "comparison_crop_top": optional_float(config.get("comparison_crop_top")),
+        "comparison_crop_right": optional_float(config.get("comparison_crop_right")),
+        "comparison_crop_bottom": optional_float(config.get("comparison_crop_bottom")),
+        "ocr_backend": string_or_default(config.get("ocr_backend"), DEFAULT_OCR_BACKEND),
+        "ocr_language": optional_string(config.get("ocr_language")),
+        "ocr_max_chars": positive_int_or_default(
+            config.get("ocr_max_chars"),
+            DEFAULT_OCR_MAX_CHARS,
+            "ocr_max_chars",
+        ),
+        "ocr_min_text_length": positive_int_or_default(
+            config.get("ocr_min_text_length"),
+            DEFAULT_OCR_MIN_TEXT_LENGTH,
+            "ocr_min_text_length",
+        ),
     }
 
 
@@ -856,6 +951,174 @@ def optional_duration_seconds(value: Any) -> float | None:
     if number < 0:
         return None
     return number
+
+
+def comparison_region_requested(options: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "mode": options.get("comparison_region_mode"),
+        "center_crop_percent": options.get("comparison_center_crop_percent"),
+        "crop_left": options.get("comparison_crop_left"),
+        "crop_top": options.get("comparison_crop_top"),
+        "crop_right": options.get("comparison_crop_right"),
+        "crop_bottom": options.get("comparison_crop_bottom"),
+    }
+
+
+def full_frame_region(width: int, height: int, warning: str | None = None) -> dict[str, Any]:
+    return {
+        "mode": "full_frame",
+        "requested": None,
+        "effective": {
+            "left": 0,
+            "top": 0,
+            "right": width,
+            "bottom": height,
+            "width": width,
+            "height": height,
+            "normalized": {
+                "left": 0.0,
+                "top": 0.0,
+                "right": 1.0,
+                "bottom": 1.0,
+            },
+        },
+        "status": "full_frame" if warning is None else "fallback_full_frame",
+        "warning": warning,
+    }
+
+
+def resolve_comparison_region(
+    image_size: tuple[int, int],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    width, height = image_size
+    requested = comparison_region_requested(options)
+    mode = str(options.get("comparison_region_mode") or DEFAULT_COMPARISON_REGION_MODE).strip()
+    mode = mode.lower().replace("-", "_")
+
+    if mode in {"", "full", "full_frame"}:
+        region = full_frame_region(width, height)
+        region["requested"] = requested
+        return region
+
+    if mode == "center_crop":
+        percent = float(
+            options.get("comparison_center_crop_percent")
+            or DEFAULT_COMPARISON_CENTER_CROP_PERCENT
+        )
+        if percent <= 0 or percent > 1:
+            region = full_frame_region(
+                width,
+                height,
+                f"Invalid comparison_center_crop_percent: {percent}.",
+            )
+            region["requested"] = requested
+            return region
+        crop_width = max(1, int(round(width * percent)))
+        crop_height = max(1, int(round(height * percent)))
+        left = max(0, (width - crop_width) // 2)
+        top = max(0, (height - crop_height) // 2)
+        right = min(width, left + crop_width)
+        bottom = min(height, top + crop_height)
+        return {
+            "mode": "center_crop",
+            "requested": requested,
+            "effective": {
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "width": right - left,
+                "height": bottom - top,
+                "normalized": {
+                    "left": round(left / width, 6) if width else 0.0,
+                    "top": round(top / height, 6) if height else 0.0,
+                    "right": round(right / width, 6) if width else 1.0,
+                    "bottom": round(bottom / height, 6) if height else 1.0,
+                },
+            },
+            "status": "active",
+            "warning": None,
+        }
+
+    if mode == "manual":
+        values = [
+            options.get("comparison_crop_left"),
+            options.get("comparison_crop_top"),
+            options.get("comparison_crop_right"),
+            options.get("comparison_crop_bottom"),
+        ]
+        if any(value is None for value in values):
+            region = full_frame_region(
+                width,
+                height,
+                "Manual comparison crop requires left, top, right, and bottom.",
+            )
+            region["requested"] = requested
+            return region
+        left_n, top_n, right_n, bottom_n = [float(value) for value in values]
+        if not (
+            0 <= left_n < right_n <= 1
+            and 0 <= top_n < bottom_n <= 1
+        ):
+            region = full_frame_region(
+                width,
+                height,
+                "Manual comparison crop must use normalized bounds within 0..1.",
+            )
+            region["requested"] = requested
+            return region
+        left = int(round(width * left_n))
+        top = int(round(height * top_n))
+        right = int(round(width * right_n))
+        bottom = int(round(height * bottom_n))
+        if right <= left or bottom <= top:
+            region = full_frame_region(
+                width,
+                height,
+                "Manual comparison crop resolved to an empty region.",
+            )
+            region["requested"] = requested
+            return region
+        return {
+            "mode": "manual",
+            "requested": requested,
+            "effective": {
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "width": right - left,
+                "height": bottom - top,
+                "normalized": {
+                    "left": left_n,
+                    "top": top_n,
+                    "right": right_n,
+                    "bottom": bottom_n,
+                },
+            },
+            "status": "active",
+            "warning": None,
+        }
+
+    region = full_frame_region(
+        width,
+        height,
+        f"Unknown comparison_region_mode: {mode}.",
+    )
+    region["requested"] = requested
+    return region
+
+
+def crop_for_comparison(image: Any, region: dict[str, Any]) -> Any:
+    effective = region["effective"]
+    box = (
+        int(effective["left"]),
+        int(effective["top"]),
+        int(effective["right"]),
+        int(effective["bottom"]),
+    )
+    return image.crop(box)
 
 
 def preflight_ffmpeg() -> dict[str, Any]:
@@ -897,8 +1160,52 @@ def frame_report_payload(
     duration_seconds: float | None,
     ffmpeg_info: dict[str, Any] | None,
     error: BaseException | None,
+    selection_summary: dict[str, Any] | None = None,
+    comparison_region: dict[str, Any] | None = None,
+    ocr_report: dict[str, Any] | None = None,
+    warnings: list[str] | None = None,
 ) -> dict[str, Any]:
     ffmpeg_info = ffmpeg_info or {}
+    selection_summary = selection_summary or {}
+    quality_checks = selection_summary.get("quality_checks") or {
+        "enabled": True,
+        "accepted_frame_count": 0,
+        "rejected_frame_count": 0,
+        "rejected_reasons": {},
+        "quality_thresholds": {
+            "min_frame_variance": options.get("min_frame_variance"),
+            "min_sharpness_score": options.get("min_sharpness_score"),
+            "dark_frame_mean_threshold": options.get("dark_frame_mean_threshold"),
+            "bright_frame_mean_threshold": options.get("bright_frame_mean_threshold"),
+            "solid_frame_variance_threshold": options.get("solid_frame_variance_threshold"),
+        },
+    }
+    keyframe_selection = selection_summary.get("keyframe_selection") or {
+        "first_valid_frame_count": 0,
+        "difference_accepted_count": 0,
+        "duplicate_rejected_count": 0,
+        "duplicate_suppressed_count": 0,
+        "quality_rejected_count": quality_checks.get("rejected_frame_count", 0),
+        "stable_segment_count": keyframe_count,
+    }
+    comparison_region = comparison_region or {
+        "mode": options.get("comparison_region_mode"),
+        "requested": comparison_region_requested(options),
+        "effective": None,
+        "status": "not_evaluated",
+        "warning": None,
+    }
+    ocr_report = ocr_report or build_ocr_report(
+        options,
+        processed_keyframe_count=0,
+        text_hint_count=0,
+        warning=None,
+    )
+    warnings = warnings or []
+    if comparison_region.get("warning"):
+        warnings.append(str(comparison_region["warning"]))
+    if ocr_report.get("warning"):
+        warnings.append(str(ocr_report["warning"]))
     return {
         "run_id": run_id,
         "video_path": video_path,
@@ -916,6 +1223,22 @@ def frame_report_payload(
         "max_keyframes": options.get("max_keyframes"),
         "duration_seconds": duration_seconds,
         "method": VISUAL_EXTRACTION_METHOD,
+        "quality_checks": quality_checks,
+        "accepted_frame_count": quality_checks.get("accepted_frame_count"),
+        "rejected_frame_count": quality_checks.get("rejected_frame_count"),
+        "rejected_reasons": quality_checks.get("rejected_reasons"),
+        "quality_thresholds": quality_checks.get("quality_thresholds"),
+        "frame_quality_checks": quality_checks,
+        "keyframe_selection": keyframe_selection,
+        "duplicate_suppressed_count": keyframe_selection.get("duplicate_suppressed_count"),
+        "duplicate_rejected_count": keyframe_selection.get("duplicate_rejected_count"),
+        "difference_accepted_count": keyframe_selection.get("difference_accepted_count"),
+        "quality_rejected_count": keyframe_selection.get("quality_rejected_count"),
+        "first_valid_frame_count": keyframe_selection.get("first_valid_frame_count"),
+        "stable_segment_count": keyframe_selection.get("stable_segment_count"),
+        "comparison_region": comparison_region,
+        "ocr": ocr_report,
+        "warnings": sorted(set(warnings)),
         "error": error_payload(error) if error is not None else None,
         "created_at": utc_now(),
     }
@@ -932,6 +1255,10 @@ def write_failed_visual_segments(
     video_path: str | None,
     keyframe_dir: Path,
     error: BaseException,
+    quality_summary: dict[str, Any] | None = None,
+    keyframe_selection: dict[str, Any] | None = None,
+    comparison_region: dict[str, Any] | None = None,
+    ocr_report: dict[str, Any] | None = None,
 ) -> None:
     payload = {
         "run_id": run_id,
@@ -941,6 +1268,10 @@ def write_failed_visual_segments(
         "segments": [],
         "segment_count": 0,
         "keyframe_dir": str(keyframe_dir),
+        "quality_summary": quality_summary or {},
+        "keyframe_selection": keyframe_selection or {},
+        "comparison_region": comparison_region,
+        "ocr": ocr_report,
         "error": error_payload(error),
         "created_at": utc_now(),
     }
@@ -954,6 +1285,9 @@ def write_visual_segments(
     keyframe_dir: Path,
     segments: list[dict[str, Any]],
     smoke_test: bool,
+    quality_summary: dict[str, Any] | None = None,
+    comparison_region: dict[str, Any] | None = None,
+    ocr_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -963,6 +1297,9 @@ def write_visual_segments(
         "segments": segments,
         "segment_count": len(segments),
         "keyframe_dir": str(keyframe_dir),
+        "quality_summary": quality_summary or {},
+        "comparison_region": comparison_region,
+        "ocr": ocr_report,
         "created_at": utc_now(),
     }
     write_json(run_dir / "audit" / "visual_segments.json", payload)
@@ -1056,10 +1393,17 @@ def pillow_resampling_filter(Image: Any) -> Any:
     return Image.LANCZOS
 
 
-def image_features(path: Path, Image: Any, ImageStat: Any) -> dict[str, Any]:
+def image_features(
+    path: Path,
+    Image: Any,
+    ImageStat: Any,
+    options: dict[str, Any],
+) -> dict[str, Any]:
     try:
         with Image.open(path) as image:
-            gray = image.convert("L")
+            comparison_region = resolve_comparison_region(image.size, options)
+            comparison_image = crop_for_comparison(image, comparison_region)
+            gray = comparison_image.convert("L")
             resample = pillow_resampling_filter(Image)
             thumbnail = gray.resize((64, 64), resample)
             stat = ImageStat.Stat(thumbnail)
@@ -1067,6 +1411,7 @@ def image_features(path: Path, Image: Any, ImageStat: Any) -> dict[str, Any]:
             total = float(sum(histogram)) or 1.0
             small = thumbnail.resize((8, 8), resample)
             pixels = list(small.getdata())
+            sharpness_score = estimate_sharpness_score(thumbnail)
     except Exception as error:
         raise PillowFrameReadFailed(f"Pillow could not read frame {path}: {error}") from error
 
@@ -1074,19 +1419,92 @@ def image_features(path: Path, Image: Any, ImageStat: Any) -> dict[str, Any]:
     return {
         "mean": float(stat.mean[0]),
         "variance": float(stat.var[0]),
+        "sharpness_score": sharpness_score,
         "histogram": [value / total for value in histogram],
         "average_hash": tuple(1 if pixel > average else 0 for pixel in pixels),
+        "comparison_region": comparison_region,
+    }
+
+
+def estimate_sharpness_score(gray_thumbnail: Any) -> float:
+    width, height = gray_thumbnail.size
+    pixels = list(gray_thumbnail.getdata())
+    if width < 2 or height < 2:
+        return 0.0
+    total = 0.0
+    count = 0
+    for y in range(height):
+        row_offset = y * width
+        for x in range(width):
+            current = pixels[row_offset + x]
+            if x + 1 < width:
+                total += abs(current - pixels[row_offset + x + 1])
+                count += 1
+            if y + 1 < height:
+                total += abs(current - pixels[row_offset + width + x])
+                count += 1
+    return total / count if count else 0.0
+
+
+def frame_quality_thresholds(options: dict[str, Any]) -> dict[str, float | None]:
+    return {
+        "min_frame_variance": options.get("min_frame_variance"),
+        "min_sharpness_score": options.get("min_sharpness_score"),
+        "dark_frame_mean_threshold": options.get("dark_frame_mean_threshold"),
+        "bright_frame_mean_threshold": options.get("bright_frame_mean_threshold"),
+        "solid_frame_variance_threshold": options.get("solid_frame_variance_threshold"),
+    }
+
+
+def evaluate_frame_quality(
+    features: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    mean = float(features["mean"])
+    variance = float(features["variance"])
+    sharpness_score = float(features["sharpness_score"])
+    reasons = []
+
+    if (
+        mean <= float(options["dark_frame_mean_threshold"])
+        and variance <= max(100.0, float(options["min_frame_variance"]))
+    ):
+        reasons.append("dark_frame")
+    if (
+        mean >= float(options["bright_frame_mean_threshold"])
+        and variance <= max(25.0, float(options["min_frame_variance"]))
+    ):
+        reasons.append("bright_frame")
+    if variance <= float(options["solid_frame_variance_threshold"]):
+        reasons.append("near_solid_frame")
+    if variance < float(options["min_frame_variance"]):
+        reasons.append("low_variance")
+    if sharpness_score < float(options["min_sharpness_score"]):
+        reasons.append("low_sharpness")
+
+    return {
+        "accepted": not reasons,
+        "reasons": reasons,
+        "metrics": {
+            "brightness_mean": round(mean, 6),
+            "brightness_variance": round(variance, 6),
+            "sharpness_score": round(sharpness_score, 6),
+        },
     }
 
 
 def is_low_information_frame(features: dict[str, Any]) -> bool:
-    mean = float(features["mean"])
-    variance = float(features["variance"])
-    if mean <= 5 and variance <= 100:
-        return True
-    if mean >= 250 and variance <= 25:
-        return True
-    return variance <= 2
+    quality = evaluate_frame_quality(
+        features,
+        {
+            "dark_frame_mean_threshold": DEFAULT_DARK_FRAME_MEAN_THRESHOLD,
+            "bright_frame_mean_threshold": DEFAULT_BRIGHT_FRAME_MEAN_THRESHOLD,
+            "solid_frame_variance_threshold": DEFAULT_SOLID_FRAME_VARIANCE_THRESHOLD,
+            "min_frame_variance": DEFAULT_MIN_FRAME_VARIANCE,
+            "min_sharpness_score": DEFAULT_MIN_SHARPNESS_SCORE,
+        },
+    )
+    return not bool(quality["accepted"])
 
 
 def histogram_difference(left: list[float], right: list[float]) -> float:
@@ -1116,19 +1534,104 @@ def visual_difference_score(
     )
 
 
+def increment_count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def make_quality_summary(
+    options: dict[str, Any],
+    accepted_frame_count: int,
+    rejected_frame_count: int,
+    rejected_reasons: dict[str, int],
+    rejected_frame_samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "enabled": True,
+        "accepted_frame_count": accepted_frame_count,
+        "rejected_frame_count": rejected_frame_count,
+        "rejected_reasons": dict(sorted(rejected_reasons.items())),
+        "quality_thresholds": frame_quality_thresholds(options),
+        "rejected_frame_samples": rejected_frame_samples[:25],
+    }
+
+
+def make_keyframe_selection_summary(
+    candidates: list[dict[str, Any]],
+    accepted_count: int,
+    accepted_frame_count: int,
+    first_valid_frame_count: int,
+    difference_accepted_count: int,
+    duplicate_rejected_count: int,
+    duplicate_suppressed_count: int,
+    rejected_frame_count: int,
+    stable_too_short_rejected_count: int,
+    low_difference_rejected_count: int,
+    max_keyframes_reached: bool,
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "candidate_frame_count": len(candidates),
+        "valid_frame_count": accepted_frame_count,
+        "first_valid_frame_count": first_valid_frame_count,
+        "difference_accepted_count": difference_accepted_count,
+        "duplicate_rejected_count": duplicate_rejected_count,
+        "duplicate_suppressed_count": duplicate_suppressed_count,
+        "quality_rejected_count": rejected_frame_count,
+        "stable_too_short_rejected_count": stable_too_short_rejected_count,
+        "low_difference_rejected_count": low_difference_rejected_count,
+        "stable_segment_count": accepted_count,
+        "max_keyframes_reached": max_keyframes_reached,
+        "thresholds": {
+            "min_visual_difference_score": options.get("min_visual_difference_score"),
+            "min_stable_duration_seconds": options.get("min_stable_duration_seconds"),
+            "duplicate_similarity_threshold": options.get("duplicate_similarity_threshold"),
+            "duplicate_hash_distance_threshold": options.get(
+                "duplicate_hash_distance_threshold"
+            ),
+        },
+    }
+
+
 def select_keyframes(
     candidates: list[dict[str, Any]],
     options: dict[str, Any],
-) -> list[dict[str, Any]]:
+) -> tuple[list[dict[str, Any]], dict[str, Any], dict[str, Any]]:
     Image, ImageStat = import_pillow()
     accepted: list[dict[str, Any]] = []
     previous_valid_features: dict[str, Any] | None = None
+    accepted_frame_count = 0
+    rejected_frame_count = 0
+    rejected_reasons: dict[str, int] = {}
+    rejected_frame_samples: list[dict[str, Any]] = []
+    first_valid_frame_count = 0
+    difference_accepted_count = 0
+    duplicate_rejected_count = 0
+    duplicate_suppressed_count = 0
+    stable_too_short_rejected_count = 0
+    low_difference_rejected_count = 0
+    max_keyframes_reached = False
+    comparison_region: dict[str, Any] | None = None
 
     for candidate in candidates:
-        features = image_features(candidate["path"], Image, ImageStat)
-        if is_low_information_frame(features):
+        features = image_features(candidate["path"], Image, ImageStat, options)
+        comparison_region = comparison_region or features.get("comparison_region")
+        quality = evaluate_frame_quality(features, options)
+        if not quality["accepted"]:
+            rejected_frame_count += 1
+            for reason in quality["reasons"]:
+                increment_count(rejected_reasons, reason)
+            if len(rejected_frame_samples) < 25:
+                rejected_frame_samples.append(
+                    {
+                        "source_frame_path": str(candidate["path"]),
+                        "source_frame_time": round(float(candidate["time"]), 3),
+                        "reasons": quality["reasons"],
+                        "metrics": quality["metrics"],
+                    }
+                )
             continue
 
+        accepted_frame_count += 1
         score = (
             0.0
             if previous_valid_features is None
@@ -1143,33 +1646,99 @@ def select_keyframes(
                     "source_frame_time": float(candidate["time"]),
                     "reason": "first_accepted_frame",
                     "visual_difference_score": 0.0,
+                    "quality_metrics": quality["metrics"],
+                    "merged_source_frame_count": 1,
+                    "covered_source_frame_times": [float(candidate["time"])],
+                    "duplicate_suppressed_count": 0,
+                    "features": features,
                 }
             )
+            first_valid_frame_count += 1
         else:
             seconds_since_last = float(candidate["time"]) - float(
                 accepted[-1]["source_frame_time"]
             )
+            last_features = accepted[-1]["features"]
+            score_vs_last_keyframe = visual_difference_score(features, last_features)
+            hash_distance_vs_last_keyframe = average_hash_difference(
+                features["average_hash"],
+                last_features["average_hash"],
+            )
+            duplicate_similarity = 1 - score_vs_last_keyframe
+            is_duplicate = (
+                duplicate_similarity >= float(options["duplicate_similarity_threshold"])
+                and hash_distance_vs_last_keyframe
+                <= float(options["duplicate_hash_distance_threshold"])
+            )
+            if is_duplicate:
+                duplicate_rejected_count += 1
+                duplicate_suppressed_count += 1
+                accepted[-1]["duplicate_suppressed_count"] += 1
+                accepted[-1]["merged_source_frame_count"] += 1
+                accepted[-1]["covered_source_frame_times"].append(float(candidate["time"]))
+                continue
+
+            if seconds_since_last < float(options["min_stable_duration_seconds"]):
+                stable_too_short_rejected_count += 1
+                continue
+
             if (
-                score >= options["min_visual_difference_score"]
-                and seconds_since_last >= options["min_stable_duration_seconds"]
+                score_vs_last_keyframe >= options["min_visual_difference_score"]
             ):
                 accepted.append(
                     {
                         "source_frame_path": candidate["path"],
                         "source_frame_time": float(candidate["time"]),
                         "reason": "visual_difference_threshold",
-                        "visual_difference_score": score,
+                        "visual_difference_score": score_vs_last_keyframe,
+                        "quality_metrics": quality["metrics"],
+                        "merged_source_frame_count": 1,
+                        "covered_source_frame_times": [float(candidate["time"])],
+                        "duplicate_suppressed_count": 0,
+                        "features": features,
                     }
                 )
+                difference_accepted_count += 1
+            else:
+                low_difference_rejected_count += 1
 
         if len(accepted) >= options["max_keyframes"]:
+            max_keyframes_reached = True
             break
 
+    quality_summary = make_quality_summary(
+        options,
+        accepted_frame_count,
+        rejected_frame_count,
+        rejected_reasons,
+        rejected_frame_samples,
+    )
+    quality_summary["comparison_region"] = comparison_region
+    keyframe_selection = make_keyframe_selection_summary(
+        candidates=candidates,
+        accepted_count=len(accepted),
+        accepted_frame_count=accepted_frame_count,
+        first_valid_frame_count=first_valid_frame_count,
+        difference_accepted_count=difference_accepted_count,
+        duplicate_rejected_count=duplicate_rejected_count,
+        duplicate_suppressed_count=duplicate_suppressed_count,
+        rejected_frame_count=rejected_frame_count,
+        stable_too_short_rejected_count=stable_too_short_rejected_count,
+        low_difference_rejected_count=low_difference_rejected_count,
+        max_keyframes_reached=max_keyframes_reached,
+        options=options,
+    )
     if not accepted:
         raise NoAcceptableKeyframes(
-            "No candidate frames passed quality and difference filters."
+            "No candidate frames passed quality and difference filters.",
+            quality_summary=quality_summary,
+            keyframe_selection=keyframe_selection,
+            comparison_region=comparison_region,
         )
-    return accepted
+    for keyframe in accepted:
+        keyframe.pop("features", None)
+
+    return accepted, quality_summary, keyframe_selection
 
 
 def copy_keyframes_to_output(
@@ -1191,6 +1760,157 @@ def copy_keyframes_to_output(
             }
         )
     return copied
+
+
+def build_ocr_report(
+    options: dict[str, Any],
+    processed_keyframe_count: int,
+    text_hint_count: int,
+    warning: str | None,
+    status: str | None = None,
+    available: bool | None = None,
+) -> dict[str, Any]:
+    backend = str(options.get("ocr_backend") or DEFAULT_OCR_BACKEND).strip().lower()
+    if available is None:
+        available = False
+    if status is None:
+        status = "skipped" if backend == "none" else "unavailable"
+    return {
+        "backend": backend,
+        "available": available,
+        "status": status,
+        "processed_keyframe_count": processed_keyframe_count,
+        "text_hint_count": text_hint_count,
+        "warning": warning,
+    }
+
+
+def clean_ocr_text(text: str, max_chars: int) -> str:
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    if len(cleaned) > max_chars:
+        return cleaned[:max_chars].rstrip()
+    return cleaned
+
+
+def title_hint_from_text(text: str, min_length: int) -> str | None:
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        cleaned = re.sub(r"\s+", " ", line).strip()
+        if len(cleaned) >= min_length:
+            return cleaned
+    cleaned = re.sub(r"\s+", " ", text).strip()
+    return cleaned if len(cleaned) >= min_length else None
+
+
+def enrich_keyframes_with_text_hints(
+    keyframes: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    backend = str(options.get("ocr_backend") or DEFAULT_OCR_BACKEND).strip().lower()
+    max_chars = int(options.get("ocr_max_chars") or DEFAULT_OCR_MAX_CHARS)
+    min_text_length = int(options.get("ocr_min_text_length") or DEFAULT_OCR_MIN_TEXT_LENGTH)
+
+    if backend == "none":
+        for keyframe in keyframes:
+            keyframe["ocr_available"] = False
+            keyframe["ocr_text"] = None
+            keyframe["title_hint"] = None
+            keyframe["title_extraction_status"] = "skipped"
+        return keyframes, build_ocr_report(
+            options,
+            processed_keyframe_count=0,
+            text_hint_count=0,
+            warning=None,
+            status="skipped",
+            available=False,
+        )
+
+    if backend != "tesseract":
+        warning = f"Unsupported ocr_backend: {backend}."
+        for keyframe in keyframes:
+            keyframe["ocr_available"] = False
+            keyframe["ocr_text"] = None
+            keyframe["title_hint"] = None
+            keyframe["title_extraction_status"] = "unsupported_backend"
+        return keyframes, build_ocr_report(
+            options,
+            processed_keyframe_count=0,
+            text_hint_count=0,
+            warning=warning,
+            status="unsupported_backend",
+            available=False,
+        )
+
+    tesseract_path = shutil.which("tesseract")
+    if tesseract_path is None:
+        warning = "tesseract was not found on PATH."
+        for keyframe in keyframes:
+            keyframe["ocr_available"] = False
+            keyframe["ocr_text"] = None
+            keyframe["title_hint"] = None
+            keyframe["title_extraction_status"] = "unavailable"
+        return keyframes, build_ocr_report(
+            options,
+            processed_keyframe_count=0,
+            text_hint_count=0,
+            warning=warning,
+            status="unavailable",
+            available=False,
+        )
+
+    processed = 0
+    text_hint_count = 0
+    warnings = []
+    for keyframe in keyframes:
+        command = [tesseract_path, str(keyframe["keyframe_path"]), "stdout"]
+        language = optional_string(options.get("ocr_language"))
+        if language is not None:
+            command.extend(["-l", language])
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+        except Exception as error:
+            keyframe["ocr_available"] = True
+            keyframe["ocr_text"] = None
+            keyframe["title_hint"] = None
+            keyframe["title_extraction_status"] = "failed"
+            warnings.append(str(error))
+            continue
+
+        processed += 1
+        if result.returncode != 0:
+            keyframe["ocr_available"] = True
+            keyframe["ocr_text"] = None
+            keyframe["title_hint"] = None
+            keyframe["title_extraction_status"] = "failed"
+            if result.stderr.strip():
+                warnings.append(result.stderr.strip())
+            continue
+
+        raw_text = result.stdout or ""
+        title_hint = title_hint_from_text(raw_text, min_text_length)
+        ocr_text = clean_ocr_text(raw_text, max_chars) if title_hint is not None else None
+        if title_hint is not None:
+            text_hint_count += 1
+        keyframe["ocr_available"] = True
+        keyframe["ocr_text"] = ocr_text
+        keyframe["title_hint"] = title_hint
+        keyframe["title_extraction_status"] = (
+            "extracted" if title_hint is not None else "no_text"
+        )
+
+    warning = "; ".join(sorted(set(warnings))) if warnings else None
+    return keyframes, build_ocr_report(
+        options,
+        processed_keyframe_count=processed,
+        text_hint_count=text_hint_count,
+        warning=warning,
+        status="success" if warning is None else "partial_success",
+        available=True,
+    )
 
 
 def build_visual_segments(
@@ -1225,6 +1945,24 @@ def build_visual_segments(
                 "visual_difference_score": round(
                     float(keyframe["visual_difference_score"]),
                     6,
+                ),
+                "quality_metrics": keyframe.get("quality_metrics", {}),
+                "merged_source_frame_count": keyframe.get("merged_source_frame_count", 1),
+                "covered_source_frame_times": [
+                    round(float(value), 3)
+                    for value in keyframe.get("covered_source_frame_times", [start])
+                ],
+                "duplicate_suppressed_count": keyframe.get(
+                    "duplicate_suppressed_count",
+                    0,
+                ),
+                "comparison_region_mode": options.get("comparison_region_mode"),
+                "ocr_available": keyframe.get("ocr_available", False),
+                "ocr_text": keyframe.get("ocr_text"),
+                "title_hint": keyframe.get("title_hint"),
+                "title_extraction_status": keyframe.get(
+                    "title_extraction_status",
+                    "skipped",
                 ),
             }
         )
@@ -1511,6 +2249,11 @@ def run_batch_3(
     ffmpeg_info: dict[str, Any] | None = None
     frame_count = 0
     keyframe_count = 0
+    quality_summary: dict[str, Any] | None = None
+    keyframe_selection: dict[str, Any] | None = None
+    comparison_region: dict[str, Any] | None = None
+    ocr_report: dict[str, Any] | None = None
+    warnings: list[str] = []
 
     try:
         options = resolve_visual_options(
@@ -1519,6 +2262,23 @@ def run_batch_3(
             frame_smoke_override,
             max_keyframes_override,
         )
+        ocr_report = build_ocr_report(
+            options,
+            processed_keyframe_count=0,
+            text_hint_count=0,
+            warning=None,
+            status="skipped" if options.get("ocr_backend") == "none" else "not_started",
+            available=False,
+        )
+        comparison_region = {
+            "mode": options.get("comparison_region_mode"),
+            "requested": comparison_region_requested(options),
+            "effective": None,
+            "status": "not_evaluated",
+            "warning": None,
+        }
+        clear_generated_visual_files(frame_dir, ("frame_*.jpg", "_raw_frame_*.jpg"))
+        clear_generated_visual_files(keyframe_dir, ("keyframe_*.jpg",))
 
         download_report_path = audit_dir / "download_report.json"
         if not download_report_path.exists():
@@ -1560,8 +2320,20 @@ def run_batch_3(
             smoke_seconds=options["smoke_seconds"],
         )
         frame_count = len(candidates)
-        selected_keyframes = select_keyframes(candidates, options)
+        selected_keyframes, quality_summary, keyframe_selection = select_keyframes(
+            candidates,
+            options,
+        )
+        comparison_region = quality_summary.get("comparison_region")
+        if comparison_region and comparison_region.get("warning"):
+            warnings.append(str(comparison_region["warning"]))
         copied_keyframes = copy_keyframes_to_output(selected_keyframes, keyframe_dir)
+        copied_keyframes, ocr_report = enrich_keyframes_with_text_hints(
+            copied_keyframes,
+            options,
+        )
+        if ocr_report.get("warning"):
+            warnings.append(str(ocr_report["warning"]))
         keyframe_count = len(copied_keyframes)
         segments = build_visual_segments(
             copied_keyframes,
@@ -1575,6 +2347,9 @@ def run_batch_3(
             keyframe_dir,
             segments,
             smoke_test=options["smoke_seconds"] is not None,
+            quality_summary=quality_summary,
+            comparison_region=comparison_region,
+            ocr_report=ocr_report,
         )
 
         status = "smoke_success" if options["smoke_seconds"] is not None else "success"
@@ -1590,6 +2365,13 @@ def run_batch_3(
             duration_seconds=duration_seconds,
             ffmpeg_info=ffmpeg_info,
             error=None,
+            selection_summary={
+                "quality_checks": quality_summary,
+                "keyframe_selection": keyframe_selection,
+            },
+            comparison_region=comparison_region,
+            ocr_report=ocr_report,
+            warnings=warnings,
         )
         return run_dir, write_frame_report(run_dir, report)
     except Exception as error:
@@ -1605,6 +2387,11 @@ def run_batch_3(
                 "path": shutil.which("ffmpeg"),
                 "version": None,
             }
+        if isinstance(error, NoAcceptableKeyframes):
+            quality_summary = error.quality_summary or quality_summary
+            keyframe_selection = error.keyframe_selection or keyframe_selection
+            comparison_region = error.comparison_region or comparison_region
+            warnings.extend(error.warnings)
 
         report = frame_report_payload(
             run_id=run_id,
@@ -1618,6 +2405,13 @@ def run_batch_3(
             duration_seconds=duration_seconds,
             ffmpeg_info=ffmpeg_info,
             error=error,
+            selection_summary={
+                "quality_checks": quality_summary,
+                "keyframe_selection": keyframe_selection,
+            },
+            comparison_region=comparison_region,
+            ocr_report=ocr_report,
+            warnings=warnings,
         )
         write_frame_report(run_dir, report)
         write_failed_visual_segments(
@@ -1626,6 +2420,10 @@ def run_batch_3(
             video_path_text or (str(video_path) if video_path else None),
             keyframe_dir,
             error,
+            quality_summary=quality_summary,
+            keyframe_selection=keyframe_selection,
+            comparison_region=comparison_region,
+            ocr_report=ocr_report,
         )
         return run_dir, report
 

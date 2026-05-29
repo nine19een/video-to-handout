@@ -127,6 +127,59 @@ Batch 3 不能只凭 JSON 成功判定通过。人工必须打开 `outputs/<run_
 
 这些方向不是当前 Batch 3 已完成能力，不应在验收报告或讲义生成前过度声称。
 
+### Batch 3.x 增强实现规则
+
+Batch 3.x 可以在不进入 Batch 4 的前提下增强视觉证据质量。增强后的定位仍然是视觉证据提取，不是语义级视觉理解。
+
+当前 Batch 3.x 增强重点：
+
+- 3.1 坏帧过滤：基于亮度、方差、清晰度/边缘近似强度过滤明显黑屏、白屏、近似纯色帧、低信息量帧和明显模糊帧。
+- 3.2 重复抑制与稳定段合并：连续相似候选帧不应反复生成 keyframe；重复抑制和稳定段合并应记录到报告中。
+- 3.3 区域比较：默认仍使用 full frame；可配置 center crop 或 manual crop；非法 crop 必须回退 full frame 并记录 warning。
+- 3.4 OCR / 文字线索：默认 `ocr_backend: "none"`，OCR 只是安全降级 hook，不作为 Batch 3.x 成功条件。
+
+Batch 3.x 新增配置必须保持保守默认值。旧配置缺失时仍应能运行。`configs/sample_config.yaml` 必须保留 placeholder URL 和 `sample_run`，不得写入真实验收视频作为默认配置。
+
+Batch 3.x 报告字段应向后兼容，只能新增字段，不得删除 Batch 3 已有字段。`frame_report.json` 可以新增：
+
+- `quality_checks`
+- `accepted_frame_count`
+- `rejected_frame_count`
+- `rejected_reasons`
+- `quality_thresholds`
+- `frame_quality_checks`
+- `keyframe_selection`
+- `duplicate_suppressed_count`
+- `duplicate_rejected_count`
+- `difference_accepted_count`
+- `quality_rejected_count`
+- `first_valid_frame_count`
+- `stable_segment_count`
+- `comparison_region`
+- `ocr`
+- `warnings`
+
+`visual_segments.json` 可以新增：
+
+- 顶层 `quality_summary`
+- 顶层 `comparison_region`
+- 顶层 `ocr`
+- segment 内 `quality_metrics`
+- segment 内 `merged_source_frame_count`
+- segment 内 `covered_source_frame_times`
+- segment 内 `duplicate_suppressed_count`
+- segment 内 `comparison_region_mode`
+- segment 内 `ocr_available`
+- segment 内 `ocr_text`
+- segment 内 `title_hint`
+- segment 内 `title_extraction_status`
+
+OCR 不可用、未安装或关闭时，不得导致 Batch 3.x 失败。合理输出是 `ocr.available: false`、`ocr.status: skipped` 或 `unavailable`，segment 内 `title_extraction_status: skipped` 或 `unavailable`。
+
+Batch 3.x smoke success 仍不等于完整视频质量可靠。keyframe 数量减少不一定失败，可能是重复抑制生效；但必须通过报告字段和人工看图确认没有漏掉重要视觉变化。
+
+Batch 3.x 开始处理某个 run 时，应清理该 run 下由本流程生成的旧候选帧和旧 keyframe 文件，避免 FFmpeg 缺失、抽帧失败或筛选失败后，目录中的历史图片被误认为本轮成功产物。
+
 # SKILL
 
 ## 技能名称
