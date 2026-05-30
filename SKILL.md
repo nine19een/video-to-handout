@@ -705,3 +705,7 @@ Prompt pack 不得包含：
 未来 LLM 输出必须绑定 `source_unit_id`，引用真实 transcript item ID 和 visual segment ID，只使用当前 unit 提供的证据。响应格式错误、空响应或引用越界时，应降级为 skeleton 并写入 `review_report.md`。
 
 Batch 5A skeleton 和未来 LLM-backed draft 都不等于人工验收通过。
+
+### Batch 5A Git hygiene
+
+Batch 5A 生成的 `content_map.json`、`review_report.md`、`lecture_handout.md` 和 `handout_prompt_pack.jsonl` 都是运行产物，不得提交到 Git。讲义层 near-duplicate dedupe 只能选择代表图，不得删除底层 `visual_segments.json` 或 keyframe 文件。

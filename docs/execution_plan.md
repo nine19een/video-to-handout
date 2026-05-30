@@ -769,6 +769,20 @@ llm_allow_network_calls: false
 
 不得只检查 `Path.is_absolute()`，也不得使用字符串 `startswith()` 代替路径 containment。
 
+### Batch 5A Solidify 状态
+
+Batch 5A 已完成实现、独立验收和最低限度人工抽查。
+
+- Validation verdict：`PASS with HUMAN_REVIEW_REQUIRED`
+- Manual review conclusion：`PASS with known limitations`
+- prompt pack path containment 自动复验通过；Windows symlink escape 测试因权限限制 skip，作为 non-blocking risk 记录。
+- `1640/1650/1660/1680` 附近的连续教学示例只在 handout layer 保留一张代表图。
+- `4520/4530` 附近保留 fuller representative。
+- `5690` 附近的 partial content missing 作为 known issue 记录。
+- 当前 handout skeleton 仍然细碎、机械，缺少 LLM 总结提炼。这是 Batch 5B 的目标，不阻塞 Batch 5A。
+
+下一阶段只能是单独规划的 Batch 5B LLM-backed summarization / restructuring / polishing。本轮不得直接实现 Batch 5B。
+
 ## Batch 5B：Real LLM-backed Handout Generation
 
 Batch 5B 尚未批准实现。后续可在 Batch 5A 已验收的 content map 和 prompt pack 之上增加 provider adapter、结构化响应校验、usage metadata、失败降级和最终中文讲义渲染。
