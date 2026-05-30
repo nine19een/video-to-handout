@@ -586,3 +586,106 @@ Batch 4 应基于 Batch 3.x 已验收的 visual segments 和 keyframes 进行字
 - 没有运行 full-video visual extraction。
 - 没有运行 Batch 4 alignment。
 - 没有 commit。
+
+## Batch 4.5A-fix：Process-state Duplicate Suppression
+
+### 目标
+
+减少同一 slide 或同一讲解阶段中的逐步动画中间态 keyframes，优先保留稳定态、最终态或信息更完整的代表帧。
+
+### 包含内容
+
+- 在现有 keyframe selection 之后执行 conservative post-selection collapse。
+- 通过时间窗口、scene-change score、hash/layout similarity guardrails 判断同一 build group。
+- 同一 group 中压缩中间态，默认保留最后稳定态。
+- 在 `frame_report.json` 和 `visual_segments.json` 中记录 animation collapse summary。
+
+### 不包含内容
+
+- 不修改 1080p acquisition 逻辑。
+- 不修改 yt-dlp selector。
+- 不运行 Batch 4 alignment。
+- 不进入 Batch 5。
+- 不生成 `content_map.json`、`review_report.md` 或 `lecture_handout.md`。
+- 不声称实现语义级 slide understanding。
+
+### 验收门
+
+- `python -m py_compile src/run_pipeline.py` 通过。
+- `python -m src.run_pipeline --help` 通过。
+- `git diff --check` 通过。
+- focused synthetic / small test 能证明同组中间态会被 collapse，gap 过大和 scene-change 过大不会误合并。
+- full 1080p visual extraction rerun 后 resolution 仍为 `1920x1080`。
+- tail coverage 不回退。
+- Batch 4/5 禁区产物不存在。
+- 人工 keyframe review 确认过程态重复减少且未误删重要视觉变化。
+
+## Batch 4.5A-fix：Process-state Collapse Failure Repair
+
+### 目标
+
+修复上一轮 process-state collapse 的人工验收失败：同一 build-up 序列未充分压缩，以及错误保留早期不完整态、删除后续完整态。
+
+### 包含内容
+
+- 改进 same build group boundary，不只依赖相邻一跳和硬 gap/span 阈值。
+- 使用 group anchor、当前代表候选和标题/布局区域连续性判断 build-up chain。
+- 增加 conservative adjacent group merge pass。
+- 增加不依赖 OCR 的 fuller/final state score。
+- 允许 duplicate / low-difference 路径中的后续更完整候选替换早期不完整 keyframe。
+- 增强 `frame_report.json` 与 `visual_segments.json` 的 collapse diagnostics。
+
+### 不包含内容
+
+- 不修改 1080p acquisition 或 yt-dlp selector。
+- 不把 720p 当作合格目标。
+- 不运行 Batch 4 alignment。
+- 不进入 Batch 5。
+- 不生成 `content_map.json`、`review_report.md` 或 `lecture_handout.md`。
+- 不声称实现了语义级 slide understanding。
+- 不引入 OCR 硬依赖或外部服务。
+
+### 验收门
+
+- `python -m py_compile src/run_pipeline.py` 通过。
+- `python -m src.run_pipeline --help` 通过。
+- `git diff --check` 通过。
+- focused synthetic tests 覆盖 build-up under-collapse、wrong representative、不同 slide guardrail、tail guard 和 later-state rejection diagnostic。
+- full 1080p visual extraction rerun 后仍为 `1920x1080`。
+- last keyframe/source_frame_time 不明显回退。
+- Batch 4/5 禁区产物不存在。
+- 重点人工复查 early build-up 区间、operator fusion 区间和其他 dense intervals。
+
+## Batch 4.5A-fix：Final-state Missing Root-cause Repair
+
+### 目标
+
+本轮继续修复 Batch 4.5A-fix 的 process-state collapse，不进入后续阶段。重点不是继续泛化调参，而是把最终态缺失按 candidate frame、initial accepted keyframe、collapse group、representative selection 和 final keyframe 的顺序追踪清楚，并针对已确认的断点做窄范围修复。
+
+### 包含内容
+
+- 新增 `final_state_trace`，记录低内容 early state 和 boundary override 的决策路径。
+- 对低内容、标题占比高、大面积空白的 early state 增加保守 lookahead。在同一视觉上下文中找到更完整状态时，压掉 early state，并在需要时补入后续 candidate。
+- 对标题区域高度连续、scene-change risk 低、fuller score 上升的 build-up sequence，允许有限覆盖 gap 或 hash guardrail。
+- 对明显 fullness reset 增加新 sequence 断点，避免链式合并跨越真正不同页面。
+- 保留默认关闭的 adaptive local rescan hook。本轮不降低全局抽帧间隔。
+- 报告中记录 `low_content_lookahead`、boundary override、fullness reset、sampling warning 和 final-state trace。
+
+### 不包含内容
+
+- 不修改 1080p acquisition 或下载选择器。
+- 不运行 Batch 4 alignment。
+- 不进入 Batch 5。
+- 不生成讲义、内容索引或 review report。
+- 不引入 OCR 硬依赖，不依赖外部服务。
+- 不对生产逻辑写入案例时间戳或页面名称。
+
+### 验收门
+
+- `python -m py_compile src/run_pipeline.py`
+- `python -m src.run_pipeline --help`
+- `git diff --check`
+- focused synthetic tests：candidate-only 补入、错误分组修复、组内 fuller representative、真实标题页保留、sampling warning、fullness reset 断组。
+- full 1080p visual rerun，并使用 `python -m json.tool` 检查 JSON。
+- 复核 1080p、tail coverage、path consistency 和禁止产物边界。
+- dense interval review、独立 Validation Agent 复核和人工 keyframe review。

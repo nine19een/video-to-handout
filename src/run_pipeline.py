@@ -39,6 +39,46 @@ DEFAULT_COMPARISON_CENTER_CROP_PERCENT = 1.0
 DEFAULT_OCR_BACKEND = "none"
 DEFAULT_OCR_MAX_CHARS = 500
 DEFAULT_OCR_MIN_TEXT_LENGTH = 4
+DEFAULT_ANIMATION_COLLAPSE_ENABLED = True
+DEFAULT_COLLAPSE_WINDOW_SECONDS = 90.0
+DEFAULT_BUILD_GROUP_MAX_GAP_SECONDS = 40.0
+DEFAULT_MAX_INTERMEDIATE_KEYFRAMES_PER_GROUP = 1
+DEFAULT_BUILD_GROUP_SIMILARITY_THRESHOLD = 0.45
+DEFAULT_BUILD_GROUP_HASH_DISTANCE_THRESHOLD = 0.35
+DEFAULT_MIN_SCENE_CHANGE_SCORE = 0.55
+DEFAULT_FINAL_STATE_PREFERENCE = "fuller_final_state"
+DEFAULT_COLLAPSE_REPORT_ENABLED = True
+DEFAULT_FULLER_STATE_SCORING_ENABLED = True
+DEFAULT_FULLER_STATE_WEIGHT = 1.0
+DEFAULT_TIME_PREFERENCE_WEIGHT = 0.08
+DEFAULT_CONTENT_AREA_WEIGHT = 0.45
+DEFAULT_DETAIL_DENSITY_WEIGHT = 0.25
+DEFAULT_LAYOUT_RICHNESS_WEIGHT = 0.30
+DEFAULT_CONSERVATIVE_GROUP_MERGE_ENABLED = True
+DEFAULT_GROUP_MERGE_MAX_GAP_SECONDS = 150.0
+DEFAULT_GROUP_MERGE_MIN_CONTINUITY_SCORE = 0.72
+DEFAULT_TITLE_REGION_MAX_DIFFERENCE = 0.14
+DEFAULT_FULLER_REPLACEMENT_MIN_DELTA = 0.01
+DEFAULT_REPORT_GROUP_DECISIONS_LIMIT = 200
+DEFAULT_FINAL_STATE_TRACE_ENABLED = True
+DEFAULT_FINAL_STATE_TRACE_REPORT_LIMIT = 50
+DEFAULT_LOW_CONTENT_LOOKAHEAD_ENABLED = True
+DEFAULT_LOW_CONTENT_LOOKAHEAD_SECONDS = 180.0
+DEFAULT_LOW_CONTENT_CONTENT_AREA_THRESHOLD = 0.12
+DEFAULT_LOW_CONTENT_DETAIL_DENSITY_THRESHOLD = 0.10
+DEFAULT_LOW_CONTENT_LAYOUT_RICHNESS_THRESHOLD = 0.30
+DEFAULT_LOW_CONTENT_TITLE_REGION_MAX_DIFFERENCE = 0.22
+DEFAULT_LOW_CONTENT_SLIDE_REGION_MAX_DIFFERENCE = 0.70
+DEFAULT_TITLE_ONLY_PENALTY_ENABLED = True
+DEFAULT_TITLE_SLIDE_KEEP_POLICY = "keep_if_no_fuller_same_context"
+DEFAULT_GROUP_FULLNESS_RESET_MIN_DELTA = 0.18
+DEFAULT_STRONG_TITLE_REGION_MAX_DIFFERENCE = 0.08
+DEFAULT_STRONG_TITLE_GROUP_MERGE_MAX_GAP_SECONDS = 300.0
+DEFAULT_STRONG_TITLE_BUILD_GROUP_HASH_DISTANCE_THRESHOLD = 0.45
+DEFAULT_ADAPTIVE_RESCAN_ENABLED = False
+DEFAULT_ADAPTIVE_RESCAN_INTERVAL_SECONDS = 2.0
+DEFAULT_ADAPTIVE_RESCAN_WINDOW_SECONDS = 90.0
+MAX_COLLAPSE_GROUP_SUMMARIES = 25
 SUBTITLE_SUFFIXES = {".vtt", ".srt"}
 VISUAL_EXTRACTION_METHOD = "ffmpeg_interval_plus_pillow_difference_v1"
 ALIGNMENT_METHOD = "transcript_visual_time_alignment_v1"
@@ -1372,6 +1412,191 @@ def resolve_visual_options(
             DEFAULT_MIN_KEYFRAME_HEIGHT,
             "min_keyframe_height",
         ),
+        "animation_collapse_enabled": bool_or_default(
+            config.get("animation_collapse_enabled"),
+            DEFAULT_ANIMATION_COLLAPSE_ENABLED,
+        ),
+        "collapse_window_seconds": positive_float_or_default(
+            config.get("collapse_window_seconds"),
+            DEFAULT_COLLAPSE_WINDOW_SECONDS,
+            "collapse_window_seconds",
+        ),
+        "build_group_max_gap_seconds": positive_float_or_default(
+            config.get("build_group_max_gap_seconds"),
+            DEFAULT_BUILD_GROUP_MAX_GAP_SECONDS,
+            "build_group_max_gap_seconds",
+        ),
+        "max_intermediate_keyframes_per_group": positive_int_or_default(
+            config.get("max_intermediate_keyframes_per_group"),
+            DEFAULT_MAX_INTERMEDIATE_KEYFRAMES_PER_GROUP,
+            "max_intermediate_keyframes_per_group",
+        ),
+        "build_group_similarity_threshold": nonnegative_float_or_default(
+            config.get("build_group_similarity_threshold"),
+            DEFAULT_BUILD_GROUP_SIMILARITY_THRESHOLD,
+            "build_group_similarity_threshold",
+        ),
+        "build_group_hash_distance_threshold": nonnegative_float_or_default(
+            config.get("build_group_hash_distance_threshold"),
+            DEFAULT_BUILD_GROUP_HASH_DISTANCE_THRESHOLD,
+            "build_group_hash_distance_threshold",
+        ),
+        "min_scene_change_score": nonnegative_float_or_default(
+            config.get("min_scene_change_score"),
+            DEFAULT_MIN_SCENE_CHANGE_SCORE,
+            "min_scene_change_score",
+        ),
+        "final_state_preference": string_or_default(
+            config.get("final_state_preference"),
+            DEFAULT_FINAL_STATE_PREFERENCE,
+        ),
+        "collapse_report_enabled": bool_or_default(
+            config.get("collapse_report_enabled"),
+            DEFAULT_COLLAPSE_REPORT_ENABLED,
+        ),
+        "fuller_state_scoring_enabled": bool_or_default(
+            config.get("fuller_state_scoring_enabled"),
+            DEFAULT_FULLER_STATE_SCORING_ENABLED,
+        ),
+        "fuller_state_weight": nonnegative_float_or_default(
+            config.get("fuller_state_weight"),
+            DEFAULT_FULLER_STATE_WEIGHT,
+            "fuller_state_weight",
+        ),
+        "time_preference_weight": nonnegative_float_or_default(
+            config.get("time_preference_weight"),
+            DEFAULT_TIME_PREFERENCE_WEIGHT,
+            "time_preference_weight",
+        ),
+        "content_area_weight": nonnegative_float_or_default(
+            config.get("content_area_weight"),
+            DEFAULT_CONTENT_AREA_WEIGHT,
+            "content_area_weight",
+        ),
+        "detail_density_weight": nonnegative_float_or_default(
+            config.get("detail_density_weight"),
+            DEFAULT_DETAIL_DENSITY_WEIGHT,
+            "detail_density_weight",
+        ),
+        "layout_richness_weight": nonnegative_float_or_default(
+            config.get("layout_richness_weight"),
+            DEFAULT_LAYOUT_RICHNESS_WEIGHT,
+            "layout_richness_weight",
+        ),
+        "conservative_group_merge_enabled": bool_or_default(
+            config.get("conservative_group_merge_enabled"),
+            DEFAULT_CONSERVATIVE_GROUP_MERGE_ENABLED,
+        ),
+        "group_merge_max_gap_seconds": positive_float_or_default(
+            config.get("group_merge_max_gap_seconds"),
+            DEFAULT_GROUP_MERGE_MAX_GAP_SECONDS,
+            "group_merge_max_gap_seconds",
+        ),
+        "group_merge_min_continuity_score": nonnegative_float_or_default(
+            config.get("group_merge_min_continuity_score"),
+            DEFAULT_GROUP_MERGE_MIN_CONTINUITY_SCORE,
+            "group_merge_min_continuity_score",
+        ),
+        "title_region_max_difference": nonnegative_float_or_default(
+            config.get("title_region_max_difference"),
+            DEFAULT_TITLE_REGION_MAX_DIFFERENCE,
+            "title_region_max_difference",
+        ),
+        "fuller_replacement_min_delta": nonnegative_float_or_default(
+            config.get("fuller_replacement_min_delta"),
+            DEFAULT_FULLER_REPLACEMENT_MIN_DELTA,
+            "fuller_replacement_min_delta",
+        ),
+        "report_group_decisions_limit": positive_int_or_default(
+            config.get("report_group_decisions_limit"),
+            DEFAULT_REPORT_GROUP_DECISIONS_LIMIT,
+            "report_group_decisions_limit",
+        ),
+        "final_state_trace_enabled": bool_or_default(
+            config.get("final_state_trace_enabled"),
+            DEFAULT_FINAL_STATE_TRACE_ENABLED,
+        ),
+        "final_state_trace_report_limit": positive_int_or_default(
+            config.get("final_state_trace_report_limit"),
+            DEFAULT_FINAL_STATE_TRACE_REPORT_LIMIT,
+            "final_state_trace_report_limit",
+        ),
+        "low_content_lookahead_enabled": bool_or_default(
+            config.get("low_content_lookahead_enabled"),
+            DEFAULT_LOW_CONTENT_LOOKAHEAD_ENABLED,
+        ),
+        "low_content_lookahead_seconds": positive_float_or_default(
+            config.get("low_content_lookahead_seconds"),
+            DEFAULT_LOW_CONTENT_LOOKAHEAD_SECONDS,
+            "low_content_lookahead_seconds",
+        ),
+        "low_content_content_area_threshold": nonnegative_float_or_default(
+            config.get("low_content_content_area_threshold"),
+            DEFAULT_LOW_CONTENT_CONTENT_AREA_THRESHOLD,
+            "low_content_content_area_threshold",
+        ),
+        "low_content_detail_density_threshold": nonnegative_float_or_default(
+            config.get("low_content_detail_density_threshold"),
+            DEFAULT_LOW_CONTENT_DETAIL_DENSITY_THRESHOLD,
+            "low_content_detail_density_threshold",
+        ),
+        "low_content_layout_richness_threshold": nonnegative_float_or_default(
+            config.get("low_content_layout_richness_threshold"),
+            DEFAULT_LOW_CONTENT_LAYOUT_RICHNESS_THRESHOLD,
+            "low_content_layout_richness_threshold",
+        ),
+        "low_content_title_region_max_difference": nonnegative_float_or_default(
+            config.get("low_content_title_region_max_difference"),
+            DEFAULT_LOW_CONTENT_TITLE_REGION_MAX_DIFFERENCE,
+            "low_content_title_region_max_difference",
+        ),
+        "low_content_slide_region_max_difference": nonnegative_float_or_default(
+            config.get("low_content_slide_region_max_difference"),
+            DEFAULT_LOW_CONTENT_SLIDE_REGION_MAX_DIFFERENCE,
+            "low_content_slide_region_max_difference",
+        ),
+        "title_only_penalty_enabled": bool_or_default(
+            config.get("title_only_penalty_enabled"),
+            DEFAULT_TITLE_ONLY_PENALTY_ENABLED,
+        ),
+        "title_slide_keep_policy": string_or_default(
+            config.get("title_slide_keep_policy"),
+            DEFAULT_TITLE_SLIDE_KEEP_POLICY,
+        ),
+        "group_fullness_reset_min_delta": nonnegative_float_or_default(
+            config.get("group_fullness_reset_min_delta"),
+            DEFAULT_GROUP_FULLNESS_RESET_MIN_DELTA,
+            "group_fullness_reset_min_delta",
+        ),
+        "strong_title_region_max_difference": nonnegative_float_or_default(
+            config.get("strong_title_region_max_difference"),
+            DEFAULT_STRONG_TITLE_REGION_MAX_DIFFERENCE,
+            "strong_title_region_max_difference",
+        ),
+        "strong_title_group_merge_max_gap_seconds": positive_float_or_default(
+            config.get("strong_title_group_merge_max_gap_seconds"),
+            DEFAULT_STRONG_TITLE_GROUP_MERGE_MAX_GAP_SECONDS,
+            "strong_title_group_merge_max_gap_seconds",
+        ),
+        "strong_title_build_group_hash_distance_threshold": nonnegative_float_or_default(
+            config.get("strong_title_build_group_hash_distance_threshold"),
+            DEFAULT_STRONG_TITLE_BUILD_GROUP_HASH_DISTANCE_THRESHOLD,
+            "strong_title_build_group_hash_distance_threshold",
+        ),
+        "adaptive_rescan_enabled": bool_or_default(
+            config.get("adaptive_rescan_enabled"),
+            DEFAULT_ADAPTIVE_RESCAN_ENABLED,
+        ),
+        "adaptive_rescan_interval_seconds": positive_float_or_default(
+            config.get("adaptive_rescan_interval_seconds"),
+            DEFAULT_ADAPTIVE_RESCAN_INTERVAL_SECONDS,
+            "adaptive_rescan_interval_seconds",
+        ),
+        "adaptive_rescan_window_seconds": positive_float_or_default(
+            config.get("adaptive_rescan_window_seconds"),
+            DEFAULT_ADAPTIVE_RESCAN_WINDOW_SECONDS,
+            "adaptive_rescan_window_seconds",
+        ),
     }
 
 
@@ -1704,6 +1929,18 @@ def frame_report_payload(
         "quality_rejected_count": quality_checks.get("rejected_frame_count", 0),
         "stable_segment_count": keyframe_count,
     }
+    animation_collapse = keyframe_selection.get("animation_collapse")
+    if not isinstance(animation_collapse, dict):
+        animation_collapse = (
+            quality_checks.get("animation_collapse")
+            if isinstance(quality_checks.get("animation_collapse"), dict)
+            else empty_animation_collapse_summary(
+                options,
+                original_keyframe_count=keyframe_count,
+                collapsed_keyframe_count=keyframe_count,
+                enabled=bool(options.get("animation_collapse_enabled")),
+            )
+        )
     comparison_region = comparison_region or {
         "mode": options.get("comparison_region_mode"),
         "requested": comparison_region_requested(options),
@@ -1777,6 +2014,16 @@ def frame_report_payload(
         "quality_rejected_count": keyframe_selection.get("quality_rejected_count"),
         "first_valid_frame_count": keyframe_selection.get("first_valid_frame_count"),
         "stable_segment_count": keyframe_selection.get("stable_segment_count"),
+        "animation_collapse_enabled": animation_collapse.get("enabled"),
+        "animation_collapse": animation_collapse,
+        "collapsed_group_count": animation_collapse.get("collapsed_group_count"),
+        "intermediate_suppressed_count": animation_collapse.get(
+            "intermediate_suppressed_count"
+        ),
+        "replaced_intermediate_count": animation_collapse.get(
+            "replaced_intermediate_count"
+        ),
+        "final_state_trace": animation_collapse.get("final_state_trace"),
         "comparison_region": comparison_region,
         "ocr": ocr_report,
         "raw_video_resolution": resolution_report.get("raw_video_resolution"),
@@ -1835,6 +2082,7 @@ def write_visual_segments(
     quality_summary: dict[str, Any] | None = None,
     comparison_region: dict[str, Any] | None = None,
     ocr_report: dict[str, Any] | None = None,
+    animation_collapse: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         "run_id": run_id,
@@ -1847,6 +2095,7 @@ def write_visual_segments(
         "quality_summary": quality_summary or {},
         "comparison_region": comparison_region,
         "ocr": ocr_report,
+        "animation_collapse": animation_collapse or {},
         "created_at": utc_now(),
     }
     write_json(run_dir / "audit" / "visual_segments.json", payload)
@@ -1940,6 +2189,109 @@ def pillow_resampling_filter(Image: Any) -> Any:
     return Image.LANCZOS
 
 
+def normalized_histogram(histogram: list[int]) -> list[float]:
+    total = float(sum(histogram)) or 1.0
+    return [value / total for value in histogram]
+
+
+def average_hash_from_pixels(pixels: list[int]) -> tuple[int, ...]:
+    average = sum(pixels) / len(pixels)
+    return tuple(1 if pixel > average else 0 for pixel in pixels)
+
+
+def estimate_content_area_ratio(pixels: list[int], threshold: int = 245) -> float:
+    if not pixels:
+        return 0.0
+    return sum(1 for pixel in pixels if pixel < threshold) / len(pixels)
+
+
+def estimate_detail_density(
+    pixels: list[int],
+    width: int,
+    height: int,
+    threshold: int = 12,
+) -> float:
+    if width < 2 or height < 2:
+        return 0.0
+    edge_count = 0
+    comparison_count = 0
+    for y in range(height):
+        row_offset = y * width
+        for x in range(width):
+            current = pixels[row_offset + x]
+            if x + 1 < width:
+                edge_count += (
+                    1 if abs(current - pixels[row_offset + x + 1]) > threshold else 0
+                )
+                comparison_count += 1
+            if y + 1 < height:
+                edge_count += (
+                    1
+                    if abs(current - pixels[row_offset + width + x]) > threshold
+                    else 0
+                )
+                comparison_count += 1
+    return edge_count / comparison_count if comparison_count else 0.0
+
+
+def estimate_layout_richness(
+    pixels: list[int],
+    width: int,
+    height: int,
+    threshold: int = 245,
+    grid_size: int = 8,
+) -> float:
+    if width < grid_size or height < grid_size:
+        return 0.0
+    occupied = 0
+    total_cells = grid_size * grid_size
+    cell_width = width // grid_size
+    cell_height = height // grid_size
+    for cell_y in range(grid_size):
+        for cell_x in range(grid_size):
+            values = []
+            for y in range(cell_y * cell_height, (cell_y + 1) * cell_height):
+                row_offset = y * width
+                for x in range(cell_x * cell_width, (cell_x + 1) * cell_width):
+                    values.append(pixels[row_offset + x])
+            if estimate_content_area_ratio(values, threshold) > 0.08:
+                occupied += 1
+    return occupied / total_cells
+
+
+def gray_signature(
+    gray_image: Any,
+    resample: Any,
+    size: tuple[int, int] = (64, 64),
+) -> dict[str, Any]:
+    thumbnail = gray_image.resize(size, resample)
+    pixels = list(thumbnail.getdata())
+    small = thumbnail.resize((8, 8), resample)
+    small_pixels = list(small.getdata())
+    width, height = thumbnail.size
+    return {
+        "histogram": normalized_histogram(thumbnail.histogram()),
+        "average_hash": average_hash_from_pixels(small_pixels),
+        "content_area_ratio": estimate_content_area_ratio(pixels),
+        "ink_density": estimate_content_area_ratio(pixels, threshold=220),
+        "detail_density": estimate_detail_density(pixels, width, height),
+        "layout_richness": estimate_layout_richness(pixels, width, height),
+    }
+
+
+def relative_crop(image: Any, box: tuple[float, float, float, float]) -> Any:
+    width, height = image.size
+    left, top, right, bottom = box
+    return image.crop(
+        (
+            max(0, min(width, int(width * left))),
+            max(0, min(height, int(height * top))),
+            max(0, min(width, int(width * right))),
+            max(0, min(height, int(height * bottom))),
+        )
+    )
+
+
 def image_features(
     path: Path,
     Image: Any,
@@ -1955,21 +2307,25 @@ def image_features(
             thumbnail = gray.resize((64, 64), resample)
             stat = ImageStat.Stat(thumbnail)
             histogram = thumbnail.histogram()
-            total = float(sum(histogram)) or 1.0
             small = thumbnail.resize((8, 8), resample)
             pixels = list(small.getdata())
             sharpness_score = estimate_sharpness_score(thumbnail)
+            slide_region = relative_crop(image, (0.0, 0.08, 0.86, 1.0)).convert("L")
+            title_region = relative_crop(image, (0.04, 0.06, 0.86, 0.28)).convert("L")
+            slide_signature = gray_signature(slide_region, resample)
+            title_signature = gray_signature(title_region, resample, size=(64, 32))
     except Exception as error:
         raise PillowFrameReadFailed(f"Pillow could not read frame {path}: {error}") from error
 
-    average = sum(pixels) / len(pixels)
     return {
         "mean": float(stat.mean[0]),
         "variance": float(stat.var[0]),
         "sharpness_score": sharpness_score,
-        "histogram": [value / total for value in histogram],
-        "average_hash": tuple(1 if pixel > average else 0 for pixel in pixels),
+        "histogram": normalized_histogram(histogram),
+        "average_hash": average_hash_from_pixels(pixels),
         "comparison_region": comparison_region,
+        "slide_region": slide_signature,
+        "title_region": title_signature,
     }
 
 
@@ -2139,6 +2495,1548 @@ def make_keyframe_selection_summary(
     }
 
 
+def empty_animation_collapse_summary(
+    options: dict[str, Any],
+    original_keyframe_count: int,
+    collapsed_keyframe_count: int | None = None,
+    enabled: bool | None = None,
+) -> dict[str, Any]:
+    is_enabled = bool(options.get("animation_collapse_enabled")) if enabled is None else enabled
+    collapsed_count = (
+        original_keyframe_count
+        if collapsed_keyframe_count is None
+        else collapsed_keyframe_count
+    )
+    return {
+        "enabled": is_enabled,
+        "collapsed_group_count": 0,
+        "intermediate_suppressed_count": 0,
+        "replaced_intermediate_count": 0,
+        "original_keyframe_count": original_keyframe_count,
+        "collapsed_keyframe_count": collapsed_count,
+        "collapse_window_seconds": options.get("collapse_window_seconds"),
+        "build_group_max_gap_seconds": options.get("build_group_max_gap_seconds"),
+        "max_intermediate_keyframes_per_group": options.get(
+            "max_intermediate_keyframes_per_group"
+        ),
+        "build_group_similarity_threshold": options.get(
+            "build_group_similarity_threshold"
+        ),
+        "build_group_hash_distance_threshold": options.get(
+            "build_group_hash_distance_threshold"
+        ),
+        "min_scene_change_score": options.get("min_scene_change_score"),
+        "final_state_preference": options.get("final_state_preference"),
+        "representative_strategy": options.get("final_state_preference"),
+        "final_state_preference_details": {
+            "fuller_state_scoring_enabled": options.get("fuller_state_scoring_enabled"),
+            "fuller_state_weight": options.get("fuller_state_weight"),
+            "time_preference_weight": options.get("time_preference_weight"),
+            "content_area_weight": options.get("content_area_weight"),
+            "detail_density_weight": options.get("detail_density_weight"),
+            "layout_richness_weight": options.get("layout_richness_weight"),
+            "title_region_max_difference": options.get("title_region_max_difference"),
+            "group_fullness_reset_min_delta": options.get(
+                "group_fullness_reset_min_delta"
+            ),
+            "strong_title_region_max_difference": options.get(
+                "strong_title_region_max_difference"
+            ),
+            "strong_title_group_merge_max_gap_seconds": options.get(
+                "strong_title_group_merge_max_gap_seconds"
+            ),
+        },
+        "low_content_lookahead": {
+            "enabled": options.get("low_content_lookahead_enabled"),
+            "detected_count": 0,
+            "suppressed_count": 0,
+            "inserted_candidate_count": 0,
+            "kept_count": 0,
+            "decisions": [],
+        },
+        "final_state_trace": {
+            "enabled": options.get("final_state_trace_enabled"),
+            "traced_window_count": 0,
+            "traced_windows": [],
+            "truncated": False,
+            "adaptive_rescan": {
+                "enabled": options.get("adaptive_rescan_enabled"),
+                "interval_seconds": options.get("adaptive_rescan_interval_seconds"),
+                "window_seconds": options.get("adaptive_rescan_window_seconds"),
+                "status": "disabled_by_default"
+                if not bool(options.get("adaptive_rescan_enabled"))
+                else "hook_enabled_not_executed",
+            },
+        },
+        "warnings": [],
+        "collapse_warnings": [],
+        "group_boundary_decision_count": 0,
+        "group_boundary_decisions": [],
+        "group_boundary_decisions_truncated": False,
+        "boundary_break_reasons": {},
+        "candidate_pool_diagnostics": {},
+        "tail_collapse_check": {},
+        "group_summaries": [],
+        "group_summary_limit": MAX_COLLAPSE_GROUP_SUMMARIES,
+    }
+
+
+def clamp_unit(value: float) -> float:
+    return max(0.0, min(1.0, value))
+
+
+def feature_region_difference(
+    current_features: dict[str, Any],
+    previous_features: dict[str, Any],
+    region_key: str,
+) -> float:
+    current_region = current_features.get(region_key) or {}
+    previous_region = previous_features.get(region_key) or {}
+    if not current_region or not previous_region:
+        return 1.0
+    return max(
+        histogram_difference(
+            current_region.get("histogram", []),
+            previous_region.get("histogram", []),
+        ),
+        average_hash_difference(
+            current_region.get("average_hash", ()),
+            previous_region.get("average_hash", ()),
+        ),
+    )
+
+
+def fuller_state_score_details_from_features(
+    features: dict[str, Any],
+    options: dict[str, Any],
+    time_position: float = 0.0,
+) -> dict[str, Any]:
+    slide_region = features.get("slide_region") or {}
+    content_area = float(slide_region.get("content_area_ratio") or 0.0)
+    detail_density = float(slide_region.get("detail_density") or 0.0)
+    layout_richness = float(slide_region.get("layout_richness") or 0.0)
+    content_component = content_area * float(options.get("content_area_weight") or 0.0)
+    detail_component = detail_density * float(options.get("detail_density_weight") or 0.0)
+    layout_component = layout_richness * float(options.get("layout_richness_weight") or 0.0)
+    fuller_component = (
+        content_component + detail_component + layout_component
+    ) * float(options.get("fuller_state_weight") or 0.0)
+    time_component = clamp_unit(time_position) * float(
+        options.get("time_preference_weight") or 0.0
+    )
+    score = fuller_component + time_component
+    return {
+        "score": round(score, 6),
+        "fuller_component": round(fuller_component, 6),
+        "time_component": round(time_component, 6),
+        "content_area_ratio": round(content_area, 6),
+        "detail_density": round(detail_density, 6),
+        "layout_richness": round(layout_richness, 6),
+        "time_position": round(clamp_unit(time_position), 6),
+        "weights": {
+            "fuller_state_weight": options.get("fuller_state_weight"),
+            "time_preference_weight": options.get("time_preference_weight"),
+            "content_area_weight": options.get("content_area_weight"),
+            "detail_density_weight": options.get("detail_density_weight"),
+            "layout_richness_weight": options.get("layout_richness_weight"),
+        },
+    }
+
+
+def keyframe_fuller_state_score_details(
+    keyframe: dict[str, Any],
+    options: dict[str, Any],
+    group_start: float | None = None,
+    group_end: float | None = None,
+) -> dict[str, Any]:
+    features = keyframe.get("features") or {}
+    start = (
+        float(keyframe["source_frame_time"])
+        if group_start is None
+        else float(group_start)
+    )
+    end = float(keyframe["source_frame_time"]) if group_end is None else float(group_end)
+    span = max(0.0, end - start)
+    time_position = (
+        0.0
+        if span == 0.0
+        else (float(keyframe["source_frame_time"]) - start) / span
+    )
+    return fuller_state_score_details_from_features(features, options, time_position)
+
+
+def collapse_pair_metrics(
+    previous: dict[str, Any],
+    current: dict[str, Any],
+) -> dict[str, Any]:
+    previous_features = previous.get("features") or {}
+    current_features = current.get("features") or {}
+    if not previous_features or not current_features:
+        return {
+            "visual_difference_score": 1.0,
+            "hash_distance": 1.0,
+            "similarity": 0.0,
+            "title_region_difference": 1.0,
+            "slide_region_difference": 1.0,
+        }
+    score = visual_difference_score(current_features, previous_features)
+    hash_distance = average_hash_difference(
+        current_features.get("average_hash", ()),
+        previous_features.get("average_hash", ()),
+    )
+    return {
+        "visual_difference_score": score,
+        "hash_distance": hash_distance,
+        "similarity": 1 - score,
+        "title_region_difference": feature_region_difference(
+            current_features,
+            previous_features,
+            "title_region",
+        ),
+        "slide_region_difference": feature_region_difference(
+            current_features,
+            previous_features,
+            "slide_region",
+        ),
+    }
+
+
+def can_join_build_group(
+    group: list[dict[str, Any]],
+    candidate: dict[str, Any],
+    options: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    previous = group[-1]
+    gap = float(candidate["source_frame_time"]) - float(previous["source_frame_time"])
+    span = float(candidate["source_frame_time"]) - float(group[0]["source_frame_time"])
+    previous_metrics = collapse_pair_metrics(previous, candidate)
+    anchor_metrics = collapse_pair_metrics(group[0], candidate)
+    group_representative = max(
+        group,
+        key=lambda item: keyframe_fuller_state_score_details(item, options)["score"],
+    )
+    representative_metrics = collapse_pair_metrics(group_representative, candidate)
+    representative_score = keyframe_fuller_state_score_details(
+        group_representative,
+        options,
+    )
+    candidate_score = keyframe_fuller_state_score_details(candidate, options)
+    fullness_reset_delta = float(representative_score["score"]) - float(
+        candidate_score["score"]
+    )
+    previous_title_region_difference = float(previous_metrics["title_region_difference"])
+    title_region_difference = min(
+        previous_title_region_difference,
+        float(anchor_metrics["title_region_difference"]),
+        float(representative_metrics["title_region_difference"]),
+    )
+    visual_difference = min(
+        float(previous_metrics["visual_difference_score"]),
+        float(representative_metrics["visual_difference_score"]),
+    )
+    hash_distance = min(
+        float(previous_metrics["hash_distance"]),
+        float(representative_metrics["hash_distance"]),
+    )
+    gap_risk = gap / max(float(options["group_merge_max_gap_seconds"]), 1.0)
+    scene_risk = visual_difference / max(float(options["min_scene_change_score"]), 0.001)
+    continuity_score = clamp_unit(
+        1.0 - title_region_difference - (0.1 * scene_risk) - (0.05 * gap_risk)
+    )
+    reasons = []
+
+    if gap > float(options["group_merge_max_gap_seconds"]):
+        reasons.append("gap_exceeds_group_merge_max_gap_seconds")
+    if previous_title_region_difference > float(options["title_region_max_difference"]):
+        reasons.append("title_region_difference_exceeds_threshold")
+    if visual_difference >= float(options["min_scene_change_score"]):
+        reasons.append("visual_difference_indicates_scene_change")
+    if hash_distance > float(options["build_group_hash_distance_threshold"]):
+        reasons.append("hash_distance_exceeds_build_group_threshold")
+    if (
+        span > float(options["collapse_window_seconds"])
+        and continuity_score < float(options["group_merge_min_continuity_score"])
+    ):
+        reasons.append("span_exceeds_soft_limit_without_continuity")
+    if previous_metrics["similarity"] < float(options["build_group_similarity_threshold"]):
+        reasons.append("similarity_below_build_group_threshold")
+
+    fullness_reset = fullness_reset_delta >= float(
+        options["group_fullness_reset_min_delta"]
+    )
+    if fullness_reset:
+        reasons.append("fullness_reset_indicates_new_sequence")
+
+    strong_title_continuity = (
+        previous_title_region_difference
+        <= float(options["strong_title_region_max_difference"])
+        and gap <= float(options["strong_title_group_merge_max_gap_seconds"])
+        and visual_difference < float(options["min_scene_change_score"])
+        and hash_distance
+        <= float(options["strong_title_build_group_hash_distance_threshold"])
+        and not fullness_reset
+    )
+    overridable_reasons = {
+        "gap_exceeds_group_merge_max_gap_seconds",
+        "hash_distance_exceeds_build_group_threshold",
+        "span_exceeds_soft_limit_without_continuity",
+    }
+    overridden_reasons = []
+    if strong_title_continuity:
+        overridden_reasons = [
+            reason for reason in reasons if reason in overridable_reasons
+        ]
+        reasons = [reason for reason in reasons if reason not in overridable_reasons]
+
+    return not reasons, {
+        "from_source_frame_time": round(float(previous["source_frame_time"]), 3),
+        "candidate_source_frame_time": round(float(candidate["source_frame_time"]), 3),
+        "anchor_source_frame_time": round(float(group[0]["source_frame_time"]), 3),
+        "representative_candidate_source_frame_time": round(
+            float(group_representative["source_frame_time"]),
+            3,
+        ),
+        "gap_seconds": round(gap, 3),
+        "span_seconds": round(span, 3),
+        "visual_difference_score": round(visual_difference, 6),
+        "previous_visual_difference_score": round(
+            float(previous_metrics["visual_difference_score"]),
+            6,
+        ),
+        "anchor_visual_difference_score": round(
+            float(anchor_metrics["visual_difference_score"]),
+            6,
+        ),
+        "representative_visual_difference_score": round(
+            float(representative_metrics["visual_difference_score"]),
+            6,
+        ),
+        "hash_distance": round(hash_distance, 6),
+        "similarity": round(float(previous_metrics["similarity"]), 6),
+        "previous_title_region_difference": round(
+            previous_title_region_difference,
+            6,
+        ),
+        "title_region_difference": round(title_region_difference, 6),
+        "slide_region_difference": round(
+            min(
+                float(previous_metrics["slide_region_difference"]),
+                float(representative_metrics["slide_region_difference"]),
+            ),
+            6,
+        ),
+        "continuity_score": round(continuity_score, 6),
+        "representative_fuller_score": representative_score,
+        "candidate_fuller_score": candidate_score,
+        "fullness_reset_delta": round(fullness_reset_delta, 6),
+        "strong_title_continuity": strong_title_continuity,
+        "overridden_break_reasons": overridden_reasons,
+        "decision": "join" if not reasons else "break",
+        "break_reasons": reasons,
+    }
+
+
+def choose_collapse_representatives(
+    group: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    max_representatives = int(options["max_intermediate_keyframes_per_group"])
+    group_start = float(group[0]["source_frame_time"])
+    group_end = float(group[-1]["source_frame_time"])
+    ranked_candidates = []
+    for item in group:
+        score_details = keyframe_fuller_state_score_details(
+            item,
+            options,
+            group_start,
+            group_end,
+        )
+        ranked_candidates.append(
+            {
+                "source_frame_time": round(float(item["source_frame_time"]), 3),
+                "score": score_details["score"],
+                "score_details": score_details,
+            }
+        )
+    if len(group) <= max_representatives:
+        return list(group), ranked_candidates
+
+    preference = str(options.get("final_state_preference") or DEFAULT_FINAL_STATE_PREFERENCE)
+    if (
+        preference in {"content_fullness", "fuller_final_state"}
+        or bool(options.get("fuller_state_scoring_enabled"))
+    ):
+        scored = [
+            (
+                keyframe_fuller_state_score_details(
+                    item,
+                    options,
+                    group_start,
+                    group_end,
+                )["score"],
+                float(item["source_frame_time"]),
+                item,
+            )
+            for item in group
+        ]
+        ranked = sorted(scored, key=lambda value: (value[0], value[1]), reverse=True)
+        selected = sorted(
+            [item for _score, _time, item in ranked[:max_representatives]],
+            key=lambda item: float(item["source_frame_time"]),
+        )
+        ranked_candidates = [
+            {
+                "source_frame_time": round(float(item["source_frame_time"]), 3),
+                "score": round(float(score), 6),
+                "score_details": keyframe_fuller_state_score_details(
+                    item,
+                    options,
+                    group_start,
+                    group_end,
+                ),
+            }
+            for score, _time, item in ranked
+        ]
+        return selected, ranked_candidates
+
+    if preference == "latest_stable":
+        selected = list(group[-max_representatives:])
+        ranked_candidates = [
+            {
+                **candidate,
+                "selection_note": "latest_stable_time_order",
+            }
+            for candidate in ranked_candidates
+        ]
+        return selected, ranked_candidates
+
+    if preference == "content_fullness_legacy":
+        ranked = sorted(
+            group,
+            key=lambda item: (
+                float((item.get("quality_metrics") or {}).get("brightness_variance") or 0.0)
+                + float((item.get("quality_metrics") or {}).get("sharpness_score") or 0.0),
+                float(item["source_frame_time"]),
+            ),
+            reverse=True,
+        )
+        selected = sorted(
+            ranked[:max_representatives],
+            key=lambda item: float(item["source_frame_time"]),
+        )
+        return selected, ranked_candidates
+
+    return list(group[-max_representatives:]), ranked_candidates
+
+
+def merge_suppressed_keyframe_into_representative(
+    representative: dict[str, Any],
+    suppressed: list[dict[str, Any]],
+    group_id: int,
+    reason: str,
+    score_details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if score_details is None:
+        score_details = {}
+    if not suppressed:
+        representative["collapse_group_id"] = group_id
+        representative["representative_selection_reason"] = reason
+        representative["representative_score"] = score_details.get("score")
+        representative["representative_score_details"] = score_details
+        representative.setdefault("suppressed_intermediate_times", [])
+        representative.setdefault("replaced_intermediate_keyframes", [])
+        return representative
+
+    covered = list(representative.get("covered_source_frame_times", []))
+    replaced = []
+    for item in suppressed:
+        covered.extend(item.get("covered_source_frame_times", []))
+        if float(item["source_frame_time"]) not in covered:
+            covered.append(float(item["source_frame_time"]))
+        replaced.append(
+            {
+                "source_frame_time": round(float(item["source_frame_time"]), 3),
+                "source_frame_path": str(item["source_frame_path"]),
+                "reason": item.get("reason"),
+                "visual_difference_score": round(
+                    float(item.get("visual_difference_score") or 0.0),
+                    6,
+                ),
+                "replaced_by_later_state": float(item["source_frame_time"])
+                < float(representative["source_frame_time"]),
+                "replaced_by_source_frame_time": round(
+                    float(representative["source_frame_time"]),
+                    3,
+                ),
+            }
+        )
+    representative["covered_source_frame_times"] = sorted(
+        {float(value) for value in covered}
+    )
+    representative["merged_source_frame_count"] = len(
+        representative["covered_source_frame_times"]
+    )
+    representative["collapse_group_id"] = group_id
+    representative["representative_selection_reason"] = reason
+    representative["representative_score"] = score_details.get("score")
+    representative["representative_score_details"] = score_details
+    representative["suppressed_intermediate_times"] = [
+        item["source_frame_time"] for item in replaced
+    ]
+    representative["replaced_intermediate_keyframes"] = replaced
+    return representative
+
+
+def summarize_boundary_decisions(
+    boundary_decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    break_reasons: dict[str, int] = {}
+    join_count = 0
+    break_count = 0
+    for decision in boundary_decisions:
+        if decision.get("decision") == "join":
+            join_count += 1
+        else:
+            break_count += 1
+        for reason in decision.get("break_reasons", []):
+            increment_count(break_reasons, str(reason))
+    return {
+        "join_count": join_count,
+        "break_count": break_count,
+        "break_reasons": dict(sorted(break_reasons.items())),
+    }
+
+
+def collapse_group_summary(
+    group: list[dict[str, Any]],
+    representatives: list[dict[str, Any]],
+    suppressed: list[dict[str, Any]],
+    group_id: int,
+    reason: str,
+    ranked_candidates: list[dict[str, Any]],
+    boundary_decisions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    representative_time = float(representatives[-1]["source_frame_time"])
+    rejected_later_states = [
+        {
+            "source_frame_time": round(float(item["source_frame_time"]), 3),
+            "why_later_state_was_rejected": (
+                "lower_representative_score_than_selected_frame"
+            ),
+        }
+        for item in suppressed
+        if float(item["source_frame_time"]) > representative_time
+    ]
+    return {
+        "collapse_group_id": group_id,
+        "group_id": group_id,
+        "group_start_time": round(float(group[0]["source_frame_time"]), 3),
+        "group_end_time": round(float(group[-1]["source_frame_time"]), 3),
+        "candidate_source_frame_times": [
+            round(float(item["source_frame_time"]), 3) for item in group
+        ],
+        "source_frame_times": [
+            round(float(item["source_frame_time"]), 3) for item in group
+        ],
+        "representative_source_frame_time": round(representative_time, 3),
+        "representative_times": [
+            round(float(item["source_frame_time"]), 3) for item in representatives
+        ],
+        "representative_score": representatives[-1].get("representative_score"),
+        "representative_score_details": representatives[-1].get(
+            "representative_score_details",
+            {},
+        ),
+        "representative_candidates": ranked_candidates,
+        "suppressed_intermediate_times": [
+            round(float(item["source_frame_time"]), 3) for item in suppressed
+        ],
+        "suppressed_source_frame_times": [
+            round(float(item["source_frame_time"]), 3) for item in suppressed
+        ],
+        "rejected_later_states": rejected_later_states,
+        "why_later_state_was_rejected": rejected_later_states,
+        "representative_selection_reason": reason,
+        "original_count": len(group),
+        "collapsed_count": len(representatives),
+        "suppressed_count": len(suppressed),
+        "replaced_by_later_state": any(
+            float(item["source_frame_time"]) < representative_time for item in suppressed
+        ),
+        "boundary_decision_summary": summarize_boundary_decisions(boundary_decisions),
+    }
+
+
+def finalize_collapse_group(
+    group: list[dict[str, Any]],
+    options: dict[str, Any],
+    group_id: int,
+    boundary_decisions: list[dict[str, Any]] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    if not group:
+        return [], None
+    if boundary_decisions is None:
+        boundary_decisions = []
+
+    max_representatives = int(options["max_intermediate_keyframes_per_group"])
+    if len(group) <= max_representatives:
+        output = []
+        for item in group:
+            item["collapse_group_id"] = None
+            item["representative_selection_reason"] = "single_or_below_group_limit"
+            score_details = keyframe_fuller_state_score_details(item, options)
+            item["representative_score"] = score_details.get("score")
+            item["representative_score_details"] = score_details
+            item.setdefault("suppressed_intermediate_times", [])
+            item.setdefault("replaced_intermediate_keyframes", [])
+            output.append(item)
+        return output, None
+
+    representatives, ranked_candidates = choose_collapse_representatives(group, options)
+    representative_ids = {id(item) for item in representatives}
+    suppressed = [item for item in group if id(item) not in representative_ids]
+    reason = (
+        "fuller_final_state_score"
+        if bool(options.get("fuller_state_scoring_enabled"))
+        else str(options.get("final_state_preference") or DEFAULT_FINAL_STATE_PREFERENCE)
+    )
+    group_start = float(group[0]["source_frame_time"])
+    group_end = float(group[-1]["source_frame_time"])
+    output = [
+        merge_suppressed_keyframe_into_representative(
+            representative,
+            suppressed,
+            group_id,
+            reason,
+            keyframe_fuller_state_score_details(
+                representative,
+                options,
+                group_start,
+                group_end,
+            ),
+        )
+        for representative in representatives
+    ]
+    summary = collapse_group_summary(
+        group,
+        output,
+        suppressed,
+        group_id,
+        reason,
+        ranked_candidates,
+        boundary_decisions,
+    )
+    return output, summary
+
+
+def build_initial_collapse_groups(
+    accepted: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[list[list[dict[str, Any]]], list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    groups: list[list[dict[str, Any]]] = []
+    group_decisions: list[list[dict[str, Any]]] = []
+    all_decisions: list[dict[str, Any]] = []
+    group = [accepted[0]]
+    decisions_for_group: list[dict[str, Any]] = []
+
+    for keyframe in accepted[1:]:
+        can_join, decision = can_join_build_group(group, keyframe, options)
+        all_decisions.append(decision)
+        if can_join:
+            decisions_for_group.append(decision)
+            group.append(keyframe)
+            continue
+        groups.append(group)
+        group_decisions.append(decisions_for_group)
+        group = [keyframe]
+        decisions_for_group = []
+
+    groups.append(group)
+    group_decisions.append(decisions_for_group)
+    return groups, group_decisions, all_decisions
+
+
+def merge_adjacent_collapse_groups(
+    groups: list[list[dict[str, Any]]],
+    group_decisions: list[list[dict[str, Any]]],
+    options: dict[str, Any],
+) -> tuple[list[list[dict[str, Any]]], list[list[dict[str, Any]]], list[dict[str, Any]]]:
+    if not bool(options.get("conservative_group_merge_enabled")) or len(groups) <= 1:
+        return groups, group_decisions, []
+
+    merged_groups: list[list[dict[str, Any]]] = [groups[0]]
+    merged_decisions: list[list[dict[str, Any]]] = [group_decisions[0]]
+    merge_decisions: list[dict[str, Any]] = []
+
+    for next_group, next_decisions in zip(groups[1:], group_decisions[1:]):
+        current_group = merged_groups[-1]
+        can_merge, decision = can_join_build_group(
+            current_group,
+            next_group[0],
+            options,
+        )
+        decision["decision_context"] = "adjacent_group_merge"
+        merge_decisions.append(decision)
+        if can_merge:
+            merged_groups[-1] = current_group + next_group
+            merged_decisions[-1] = merged_decisions[-1] + [decision] + next_decisions
+        else:
+            merged_groups.append(next_group)
+            merged_decisions.append(next_decisions)
+
+    return merged_groups, merged_decisions, merge_decisions
+
+
+def collapse_process_state_keyframes(
+    accepted: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if not accepted:
+        return accepted, empty_animation_collapse_summary(options, 0)
+    if not bool(options.get("animation_collapse_enabled")):
+        for keyframe in accepted:
+            keyframe["collapse_group_id"] = None
+            keyframe["representative_selection_reason"] = "animation_collapse_disabled"
+            score_details = keyframe_fuller_state_score_details(keyframe, options)
+            keyframe["representative_score"] = score_details.get("score")
+            keyframe["representative_score_details"] = score_details
+            keyframe.setdefault("suppressed_intermediate_times", [])
+            keyframe.setdefault("replaced_intermediate_keyframes", [])
+        return accepted, empty_animation_collapse_summary(
+            options,
+            len(accepted),
+            enabled=False,
+        )
+
+    collapsed: list[dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
+    groups, group_decisions, initial_decisions = build_initial_collapse_groups(
+        accepted,
+        options,
+    )
+    groups, group_decisions, merge_decisions = merge_adjacent_collapse_groups(
+        groups,
+        group_decisions,
+        options,
+    )
+    all_decisions = initial_decisions + merge_decisions
+    group_id = 1
+
+    for group, decisions in zip(groups, group_decisions):
+        output, summary = finalize_collapse_group(
+            group,
+            options,
+            group_id,
+            decisions,
+        )
+        collapsed.extend(output)
+        if summary is not None:
+            summaries.append(summary)
+            group_id += 1
+
+    suppressed_count = sum(int(item["suppressed_count"]) for item in summaries)
+    warning_messages = []
+    pre_last_time = max(float(item["source_frame_time"]) for item in accepted)
+    post_last_time = (
+        max(float(item["source_frame_time"]) for item in collapsed)
+        if collapsed
+        else None
+    )
+    if post_last_time is None or post_last_time < pre_last_time:
+        warning_messages.append("tail_representative_would_regress_without_guard")
+        last_keyframe = accepted[-1]
+        if all(id(item) != id(last_keyframe) for item in collapsed):
+            last_keyframe["collapse_group_id"] = None
+            last_keyframe["representative_selection_reason"] = "tail_guard_preserved"
+            score_details = keyframe_fuller_state_score_details(last_keyframe, options)
+            last_keyframe["representative_score"] = score_details.get("score")
+            last_keyframe["representative_score_details"] = score_details
+            last_keyframe.setdefault("suppressed_intermediate_times", [])
+            last_keyframe.setdefault("replaced_intermediate_keyframes", [])
+            collapsed.append(last_keyframe)
+        post_last_time = max(float(item["source_frame_time"]) for item in collapsed)
+    decision_limit = int(options.get("report_group_decisions_limit") or 0)
+    summary_payload = empty_animation_collapse_summary(
+        options,
+        original_keyframe_count=len(accepted),
+        collapsed_keyframe_count=len(collapsed),
+        enabled=True,
+    )
+    summary_payload.update(
+        {
+            "collapsed_group_count": len(summaries),
+            "intermediate_suppressed_count": suppressed_count,
+            "replaced_intermediate_count": suppressed_count,
+            "group_boundary_decision_count": len(all_decisions),
+            "group_boundary_decisions": all_decisions[:decision_limit],
+            "group_boundary_decisions_truncated": len(all_decisions) > decision_limit,
+            "boundary_break_reasons": summarize_boundary_decisions(all_decisions).get(
+                "break_reasons",
+                {},
+            ),
+            "tail_collapse_check": {
+                "pre_collapse_last_source_frame_time": round(pre_last_time, 3),
+                "post_collapse_last_source_frame_time": round(
+                    float(post_last_time),
+                    3,
+                ),
+                "regressed": bool(post_last_time < pre_last_time),
+            },
+            "collapse_warnings": warning_messages,
+            "warnings": warning_messages,
+            "group_summaries": (
+                summaries[:MAX_COLLAPSE_GROUP_SUMMARIES]
+                if bool(options.get("collapse_report_enabled"))
+                else []
+            ),
+            "group_summary_truncated": len(summaries) > MAX_COLLAPSE_GROUP_SUMMARIES,
+        }
+    )
+    return collapsed, summary_payload
+
+
+def can_replace_with_fuller_later_candidate(
+    keyframe: dict[str, Any],
+    candidate_features: dict[str, Any],
+    options: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    if not bool(options.get("fuller_state_scoring_enabled")):
+        return False, {"reason": "fuller_state_scoring_disabled"}
+    current_features = keyframe.get("features") or {}
+    if not current_features:
+        return False, {"reason": "current_keyframe_missing_features"}
+    title_difference = feature_region_difference(
+        candidate_features,
+        current_features,
+        "title_region",
+    )
+    current_score = fuller_state_score_details_from_features(
+        current_features,
+        options,
+    )
+    candidate_score = fuller_state_score_details_from_features(
+        candidate_features,
+        options,
+    )
+    score_delta = float(candidate_score["score"]) - float(current_score["score"])
+    can_replace = (
+        title_difference <= float(options["title_region_max_difference"])
+        and score_delta >= float(options["fuller_replacement_min_delta"])
+    )
+    return can_replace, {
+        "title_region_difference": round(title_difference, 6),
+        "current_score": current_score,
+        "candidate_score": candidate_score,
+        "score_delta": round(score_delta, 6),
+        "reason": (
+            "candidate_is_later_fuller_state"
+            if can_replace
+            else "candidate_not_fuller_or_title_changed"
+        ),
+    }
+
+
+def replace_keyframe_with_later_candidate(
+    keyframe: dict[str, Any],
+    candidate: dict[str, Any],
+    features: dict[str, Any],
+    quality: dict[str, Any],
+    update_reason: str,
+    diagnostic: dict[str, Any],
+    score_vs_last_keyframe: float,
+) -> None:
+    previous_time = float(keyframe["source_frame_time"])
+    previous_path = str(keyframe["source_frame_path"])
+    covered = list(keyframe.get("covered_source_frame_times", []))
+    covered.append(float(candidate["time"]))
+    history = list(keyframe.get("candidate_replacement_history", []))
+    history.append(
+        {
+            "previous_source_frame_time": round(previous_time, 3),
+            "previous_source_frame_path": previous_path,
+            "replacement_source_frame_time": round(float(candidate["time"]), 3),
+            "replacement_source_frame_path": str(candidate["path"]),
+            "update_reason": update_reason,
+            "score_vs_previous_representative": round(score_vs_last_keyframe, 6),
+            "fuller_state_decision": diagnostic,
+        }
+    )
+    keyframe.update(
+        {
+            "source_frame_path": candidate["path"],
+            "source_frame_time": float(candidate["time"]),
+            "reason": update_reason,
+            "visual_difference_score": score_vs_last_keyframe,
+            "quality_metrics": quality["metrics"],
+            "features": features,
+            "covered_source_frame_times": sorted({float(value) for value in covered}),
+            "candidate_replacement_history": history,
+        }
+    )
+
+
+def maybe_replace_keyframe_with_later_candidate(
+    keyframe: dict[str, Any],
+    candidate: dict[str, Any],
+    features: dict[str, Any],
+    quality: dict[str, Any],
+    update_reason: str,
+    score_vs_last_keyframe: float,
+    options: dict[str, Any],
+    replacement_samples: list[dict[str, Any]],
+) -> bool:
+    can_replace, diagnostic = can_replace_with_fuller_later_candidate(
+        keyframe,
+        features,
+        options,
+    )
+    if not can_replace:
+        return False
+    replace_keyframe_with_later_candidate(
+        keyframe,
+        candidate,
+        features,
+        quality,
+        update_reason,
+        diagnostic,
+        score_vs_last_keyframe,
+    )
+    if len(replacement_samples) < 25:
+        replacement_samples.append(keyframe["candidate_replacement_history"][-1])
+    return True
+
+
+def low_content_state_details(
+    keyframe: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    score_details = keyframe_fuller_state_score_details(keyframe, options)
+    is_low_content = bool(options.get("title_only_penalty_enabled")) and (
+        float(score_details["content_area_ratio"])
+        <= float(options["low_content_content_area_threshold"])
+        and float(score_details["detail_density"])
+        <= float(options["low_content_detail_density_threshold"])
+        and float(score_details["layout_richness"])
+        <= float(options["low_content_layout_richness_threshold"])
+    )
+    return {
+        "is_low_content_title_frame": is_low_content,
+        "score_details": score_details,
+        "thresholds": {
+            "content_area_ratio": options.get("low_content_content_area_threshold"),
+            "detail_density": options.get("low_content_detail_density_threshold"),
+            "layout_richness": options.get("low_content_layout_richness_threshold"),
+        },
+    }
+
+
+def low_content_context_metrics(
+    early_state: dict[str, Any],
+    later_state: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    early_features = early_state.get("features") or {}
+    later_features = later_state.get("features") or {}
+    early_score = keyframe_fuller_state_score_details(early_state, options)
+    later_score = keyframe_fuller_state_score_details(later_state, options)
+    title_difference = feature_region_difference(
+        later_features,
+        early_features,
+        "title_region",
+    )
+    slide_difference = feature_region_difference(
+        later_features,
+        early_features,
+        "slide_region",
+    )
+    score_delta = float(later_score["score"]) - float(early_score["score"])
+    return {
+        "title_region_difference": round(title_difference, 6),
+        "slide_region_difference": round(slide_difference, 6),
+        "early_score": early_score,
+        "later_score": later_score,
+        "score_delta": round(score_delta, 6),
+        "same_context": (
+            title_difference
+            <= float(options["low_content_title_region_max_difference"])
+            and slide_difference
+            <= float(options["low_content_slide_region_max_difference"])
+        ),
+        "fuller_enough": score_delta
+        >= float(options["fuller_replacement_min_delta"]),
+    }
+
+
+def accepted_keyframe_from_candidate_record(
+    candidate_record: dict[str, Any],
+    early_state: dict[str, Any],
+    diagnostic: dict[str, Any],
+) -> dict[str, Any]:
+    covered = list(early_state.get("covered_source_frame_times", []))
+    covered.append(float(candidate_record["source_frame_time"]))
+    return {
+        "source_frame_path": candidate_record["source_frame_path"],
+        "source_frame_time": float(candidate_record["source_frame_time"]),
+        "reason": "low_content_lookahead_fuller_state_update",
+        "visual_difference_score": float(
+            diagnostic.get("slide_region_difference") or 0.0
+        ),
+        "quality_metrics": candidate_record.get("quality_metrics", {}),
+        "merged_source_frame_count": len({float(value) for value in covered}),
+        "covered_source_frame_times": sorted({float(value) for value in covered}),
+        "duplicate_suppressed_count": 0,
+        "features": candidate_record.get("features") or {},
+        "candidate_replacement_history": [],
+        "low_content_replacement_history": [
+            {
+                "previous_source_frame_time": round(
+                    float(early_state["source_frame_time"]),
+                    3,
+                ),
+                "replacement_source_frame_time": round(
+                    float(candidate_record["source_frame_time"]),
+                    3,
+                ),
+                "update_reason": "low_content_lookahead_fuller_state_update",
+                "fuller_state_decision": diagnostic,
+            }
+        ],
+    }
+
+
+def find_later_fuller_accepted_state(
+    early_state: dict[str, Any],
+    accepted: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    early_time = float(early_state["source_frame_time"])
+    lookahead_seconds = float(options["low_content_lookahead_seconds"])
+    best_state = None
+    best_diagnostic = None
+    last_matching_state = None
+    for later_state in accepted:
+        later_time = float(later_state["source_frame_time"])
+        if later_time <= early_time:
+            continue
+        if later_time - early_time > lookahead_seconds:
+            break
+        if last_matching_state is not None and best_state is not None:
+            transition = collapse_pair_metrics(last_matching_state, later_state)
+            if (
+                float(transition["title_region_difference"])
+                > float(options["low_content_title_region_max_difference"])
+                and float(transition["visual_difference_score"])
+                >= float(options["min_visual_difference_score"])
+            ):
+                break
+        diagnostic = low_content_context_metrics(early_state, later_state, options)
+        if not bool(diagnostic["same_context"]):
+            continue
+        last_matching_state = later_state
+        if not bool(diagnostic["fuller_enough"]):
+            continue
+        if (
+            best_diagnostic is None
+            or float(diagnostic["later_score"]["score"])
+            > float(best_diagnostic["later_score"]["score"])
+        ):
+            best_state = later_state
+            best_diagnostic = diagnostic
+    return best_state, best_diagnostic
+
+
+def candidate_record_as_keyframe(candidate_record: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "source_frame_path": candidate_record["source_frame_path"],
+        "source_frame_time": float(candidate_record["source_frame_time"]),
+        "features": candidate_record.get("features") or {},
+    }
+
+
+def find_later_fuller_candidate_record(
+    early_state: dict[str, Any],
+    candidate_records: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    early_time = float(early_state["source_frame_time"])
+    lookahead_seconds = float(options["low_content_lookahead_seconds"])
+    best_record = None
+    best_diagnostic = None
+    last_matching_state = None
+    for candidate_record in candidate_records:
+        later_time = float(candidate_record["source_frame_time"])
+        if later_time <= early_time or not bool(candidate_record.get("quality_accepted")):
+            continue
+        if later_time - early_time > lookahead_seconds:
+            break
+        later_state = candidate_record_as_keyframe(candidate_record)
+        if last_matching_state is not None and best_record is not None:
+            transition = collapse_pair_metrics(last_matching_state, later_state)
+            if (
+                float(transition["title_region_difference"])
+                > float(options["low_content_title_region_max_difference"])
+                and float(transition["visual_difference_score"])
+                >= float(options["min_visual_difference_score"])
+            ):
+                break
+        diagnostic = low_content_context_metrics(early_state, later_state, options)
+        if not bool(diagnostic["same_context"]):
+            continue
+        last_matching_state = later_state
+        if not bool(diagnostic["fuller_enough"]):
+            continue
+        if (
+            best_diagnostic is None
+            or float(diagnostic["later_score"]["score"])
+            > float(best_diagnostic["later_score"]["score"])
+        ):
+            best_record = candidate_record
+            best_diagnostic = diagnostic
+    return best_record, best_diagnostic
+
+
+def find_covering_accepted_keyframe(
+    accepted: list[dict[str, Any]],
+    source_frame_time: float,
+) -> dict[str, Any] | None:
+    for keyframe in accepted:
+        covered_times = keyframe.get("covered_source_frame_times", [])
+        if (
+            abs(float(keyframe["source_frame_time"]) - source_frame_time) < 0.001
+            or any(abs(float(value) - source_frame_time) < 0.001 for value in covered_times)
+        ):
+            return keyframe
+    return None
+
+
+def suppress_low_content_early_states(
+    accepted: list[dict[str, Any]],
+    candidate_records: list[dict[str, Any]],
+    options: dict[str, Any],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    summary = {
+        "enabled": bool(options.get("low_content_lookahead_enabled")),
+        "lookahead_seconds": options.get("low_content_lookahead_seconds"),
+        "title_slide_keep_policy": options.get("title_slide_keep_policy"),
+        "detected_count": 0,
+        "suppressed_count": 0,
+        "inserted_candidate_count": 0,
+        "kept_count": 0,
+        "decisions": [],
+    }
+    if not bool(options.get("low_content_lookahead_enabled")):
+        return accepted, summary
+
+    suppressed_ids: set[int] = set()
+    inserted: list[dict[str, Any]] = []
+    for early_state in accepted:
+        if id(early_state) in suppressed_ids:
+            continue
+        low_content = low_content_state_details(early_state, options)
+        if not bool(low_content["is_low_content_title_frame"]):
+            continue
+        summary["detected_count"] += 1
+        later_state, diagnostic = find_later_fuller_accepted_state(
+            early_state,
+            accepted,
+            options,
+        )
+        selected_source = "post_group_collapse_keyframes"
+        candidate_record = None
+        if later_state is None:
+            candidate_record, diagnostic = find_later_fuller_candidate_record(
+                early_state,
+                candidate_records,
+                options,
+            )
+            selected_source = "candidate_pool"
+            if candidate_record is not None:
+                covered_by = find_covering_accepted_keyframe(
+                    accepted,
+                    float(candidate_record["source_frame_time"]),
+                )
+                if covered_by is not None:
+                    later_state = covered_by
+                    selected_source = "post_group_collapse_covered_candidate"
+
+        early_time = round(float(early_state["source_frame_time"]), 3)
+        if later_state is None and candidate_record is None:
+            summary["kept_count"] += 1
+            summary["decisions"].append(
+                {
+                    "current_representative_time": early_time,
+                    "low_content_title_frame_warning": True,
+                    "fuller_state_found_later": False,
+                    "replacement_or_keep_reason": (
+                        "kept_low_content_state_no_fuller_same_context_candidate"
+                    ),
+                    "selected_source": None,
+                    "selected_fuller_state_time": None,
+                    "classified_root_cause": "human_review_ambiguity",
+                    "sampling_miss_warning": True,
+                    "diagnostic": low_content,
+                }
+            )
+            continue
+
+        selected_time = float(
+            later_state["source_frame_time"]
+            if later_state is not None
+            else candidate_record["source_frame_time"]
+        )
+        suppressed_ids.add(id(early_state))
+        summary["suppressed_count"] += 1
+        if later_state is not None:
+            covered = list(later_state.get("covered_source_frame_times", []))
+            covered.extend(early_state.get("covered_source_frame_times", []))
+            later_state["covered_source_frame_times"] = sorted(
+                {float(value) for value in covered}
+            )
+            later_state["merged_source_frame_count"] = len(
+                later_state["covered_source_frame_times"]
+            )
+            history = list(later_state.get("low_content_replacement_history", []))
+            history.append(
+                {
+                    "previous_source_frame_time": early_time,
+                    "replacement_source_frame_time": round(selected_time, 3),
+                    "update_reason": "low_content_lookahead_suppressed_early_state",
+                    "fuller_state_decision": diagnostic,
+                }
+            )
+            later_state["low_content_replacement_history"] = history
+        else:
+            inserted.append(
+                accepted_keyframe_from_candidate_record(
+                    candidate_record,
+                    early_state,
+                    diagnostic or {},
+                )
+            )
+            summary["inserted_candidate_count"] += 1
+
+        summary["decisions"].append(
+            {
+                "current_representative_time": early_time,
+                "low_content_title_frame_warning": True,
+                "fuller_state_found_later": True,
+                "replacement_or_keep_reason": (
+                    "suppressed_early_state_for_later_fuller_same_context"
+                ),
+                "selected_source": selected_source,
+                "matched_candidate_time": (
+                    round(float(candidate_record["source_frame_time"]), 3)
+                    if candidate_record is not None
+                    else None
+                ),
+                "selected_fuller_state_time": round(selected_time, 3),
+                "classified_root_cause": (
+                    "group_boundary_miss"
+                    if selected_source
+                    in {
+                        "post_group_collapse_keyframes",
+                        "post_group_collapse_covered_candidate",
+                    }
+                    else "initial_selection_miss"
+                ),
+                "sampling_miss_warning": False,
+                "diagnostic": diagnostic,
+            }
+        )
+
+    filtered = [
+        keyframe for keyframe in accepted if id(keyframe) not in suppressed_ids
+    ]
+    filtered.extend(inserted)
+    filtered.sort(key=lambda item: float(item["source_frame_time"]))
+    return filtered, summary
+
+
+def is_short_interval_scene_change(
+    current_features: dict[str, Any],
+    last_features: dict[str, Any],
+    score_vs_last_keyframe: float,
+    options: dict[str, Any],
+) -> bool:
+    title_difference = feature_region_difference(
+        current_features,
+        last_features,
+        "title_region",
+    )
+    return (
+        title_difference > float(options["title_region_max_difference"])
+        and score_vs_last_keyframe >= float(options["min_visual_difference_score"])
+    )
+
+
+def make_candidate_pool_diagnostics(
+    fuller_state_update_count: int,
+    replacement_samples: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "fuller_state_update_count": fuller_state_update_count,
+        "representative_update_samples": replacement_samples,
+        "diagnostic_note": (
+            "Later candidates with the same title/layout can replace an earlier "
+            "accepted state when lightweight fullness scoring improves."
+        ),
+    }
+
+
+def time_is_present(items: list[dict[str, Any]], target_time: float | None) -> bool:
+    if target_time is None:
+        return False
+    return any(
+        abs(float(item["source_frame_time"]) - float(target_time)) < 0.001
+        for item in items
+    )
+
+
+def source_times_in_window(
+    items: list[dict[str, Any]],
+    start_time: float,
+    end_time: float,
+    limit: int = 30,
+) -> list[float]:
+    values = [
+        round(float(item["source_frame_time"]), 3)
+        for item in items
+        if start_time <= float(item["source_frame_time"]) <= end_time
+    ]
+    return values[:limit]
+
+
+def collapse_group_for_time(
+    animation_collapse: dict[str, Any],
+    source_frame_time: float | None,
+) -> dict[str, Any] | None:
+    if source_frame_time is None:
+        return None
+    for group in animation_collapse.get("group_summaries", []):
+        if any(
+            abs(float(candidate_time) - float(source_frame_time)) < 0.001
+            for candidate_time in group.get("candidate_source_frame_times", [])
+        ):
+            return group
+    return None
+
+
+def make_final_state_trace_window(
+    case_or_window_id: str,
+    current_time: float,
+    selected_time: float | None,
+    start_time: float,
+    end_time: float,
+    candidate_records: list[dict[str, Any]],
+    initial_accepted: list[dict[str, Any]],
+    pre_collapse_accepted: list[dict[str, Any]],
+    final_keyframes: list[dict[str, Any]],
+    animation_collapse: dict[str, Any],
+    classified_root_cause: str,
+    replacement_or_keep_reason: str,
+    repair_applied: str | None,
+    low_content_title_frame_warning: bool,
+    sampling_miss_warning: bool,
+    initial_selection_miss_warning: bool,
+    group_boundary_miss_warning: bool,
+    representative_selection_miss_warning: bool = False,
+    report_only_ambiguity_warning: bool = False,
+    matched_candidate_time: float | None = None,
+    selected_source: str | None = None,
+) -> dict[str, Any]:
+    selected_group = collapse_group_for_time(animation_collapse, selected_time)
+    representative_time = (
+        float(selected_group["representative_source_frame_time"])
+        if selected_group is not None
+        else selected_time
+    )
+    final_output_presence = time_is_present(final_keyframes, representative_time)
+    return {
+        "case_or_window_id": case_or_window_id,
+        "window_start_time": round(start_time, 3),
+        "window_end_time": round(end_time, 3),
+        "current_representative_time": round(current_time, 3),
+        "candidate_presence": time_is_present(candidate_records, selected_time),
+        "candidate_frame_times": source_times_in_window(
+            candidate_records,
+            start_time,
+            end_time,
+        ),
+        "initial_selection_presence": time_is_present(initial_accepted, selected_time),
+        "initial_selection_times": source_times_in_window(
+            initial_accepted,
+            start_time,
+            end_time,
+        ),
+        "pre_collapse_presence": time_is_present(pre_collapse_accepted, selected_time),
+        "pre_collapse_times": source_times_in_window(
+            pre_collapse_accepted,
+            start_time,
+            end_time,
+        ),
+        "collapse_group_presence": selected_group is not None,
+        "collapse_group_id": (
+            selected_group.get("collapse_group_id")
+            if selected_group is not None
+            else None
+        ),
+        "representative_decision": replacement_or_keep_reason,
+        "selected_source": selected_source,
+        "matched_candidate_time": (
+            round(float(matched_candidate_time), 3)
+            if matched_candidate_time is not None
+            else None
+        ),
+        "covering_representative_time": (
+            round(float(representative_time), 3)
+            if matched_candidate_time is not None
+            and representative_time is not None
+            and abs(float(matched_candidate_time) - float(representative_time)) >= 0.001
+            else None
+        ),
+        "representative_time": (
+            round(float(representative_time), 3)
+            if representative_time is not None
+            else None
+        ),
+        "final_output_presence": final_output_presence,
+        "classified_root_cause": classified_root_cause,
+        "sampling_miss_warning": sampling_miss_warning,
+        "initial_selection_miss_warning": initial_selection_miss_warning,
+        "group_boundary_miss_warning": group_boundary_miss_warning,
+        "representative_selection_miss_warning": (
+            representative_selection_miss_warning
+        ),
+        "report_only_ambiguity_warning": report_only_ambiguity_warning,
+        "low_content_title_frame_warning": low_content_title_frame_warning,
+        "fuller_state_found_later": selected_time is not None,
+        "replacement_or_keep_reason": replacement_or_keep_reason,
+        "repair_applied": repair_applied,
+    }
+
+
+def build_final_state_trace(
+    candidate_records: list[dict[str, Any]],
+    initial_accepted: list[dict[str, Any]],
+    pre_collapse_accepted: list[dict[str, Any]],
+    final_keyframes: list[dict[str, Any]],
+    animation_collapse: dict[str, Any],
+    low_content_lookahead: dict[str, Any],
+    options: dict[str, Any],
+) -> dict[str, Any]:
+    report_limit = int(options["final_state_trace_report_limit"])
+    trace = {
+        "enabled": bool(options.get("final_state_trace_enabled")),
+        "traced_window_count": 0,
+        "traced_windows": [],
+        "truncated": False,
+        "adaptive_rescan": {
+            "enabled": bool(options.get("adaptive_rescan_enabled")),
+            "interval_seconds": options.get("adaptive_rescan_interval_seconds"),
+            "window_seconds": options.get("adaptive_rescan_window_seconds"),
+            "status": (
+                "disabled_by_default"
+                if not bool(options.get("adaptive_rescan_enabled"))
+                else "hook_enabled_not_executed"
+            ),
+        },
+    }
+    if not bool(options.get("final_state_trace_enabled")):
+        return trace
+
+    traced_windows = []
+    lookahead_seconds = float(options["low_content_lookahead_seconds"])
+    for index, decision in enumerate(low_content_lookahead.get("decisions", []), start=1):
+        current_time = float(decision["current_representative_time"])
+        selected_time = decision.get("selected_fuller_state_time")
+        selected_source = decision.get("selected_source")
+        matched_candidate_time = decision.get("matched_candidate_time")
+        classified_root_cause = str(decision.get("classified_root_cause"))
+        traced_windows.append(
+            make_final_state_trace_window(
+                case_or_window_id=f"auto_low_content_{index:03d}",
+                current_time=current_time,
+                selected_time=(
+                    float(selected_time) if selected_time is not None else None
+                ),
+                start_time=current_time,
+                end_time=current_time + lookahead_seconds,
+                candidate_records=candidate_records,
+                initial_accepted=initial_accepted,
+                pre_collapse_accepted=pre_collapse_accepted,
+                final_keyframes=final_keyframes,
+                animation_collapse=animation_collapse,
+                classified_root_cause=classified_root_cause,
+                replacement_or_keep_reason=str(
+                    decision.get("replacement_or_keep_reason")
+                ),
+                repair_applied=(
+                    "low_content_lookahead"
+                    if bool(decision.get("fuller_state_found_later"))
+                    else None
+                ),
+                low_content_title_frame_warning=True,
+                sampling_miss_warning=bool(decision.get("sampling_miss_warning")),
+                initial_selection_miss_warning=(
+                    selected_source == "candidate_pool"
+                ),
+                group_boundary_miss_warning=(
+                    selected_source
+                    in {
+                        "post_group_collapse_keyframes",
+                        "post_group_collapse_covered_candidate",
+                    }
+                ),
+                matched_candidate_time=(
+                    float(matched_candidate_time)
+                    if matched_candidate_time is not None
+                    else None
+                ),
+                selected_source=(
+                    str(selected_source) if selected_source is not None else None
+                ),
+            )
+        )
+
+    for index, decision in enumerate(
+        animation_collapse.get("group_boundary_decisions", []),
+        start=1,
+    ):
+        overridden_reasons = decision.get("overridden_break_reasons", [])
+        if not overridden_reasons:
+            continue
+        current_time = float(decision["from_source_frame_time"])
+        selected_time = float(decision["candidate_source_frame_time"])
+        traced_windows.append(
+            make_final_state_trace_window(
+                case_or_window_id=f"auto_boundary_override_{index:03d}",
+                current_time=current_time,
+                selected_time=selected_time,
+                start_time=current_time,
+                end_time=selected_time,
+                candidate_records=candidate_records,
+                initial_accepted=initial_accepted,
+                pre_collapse_accepted=pre_collapse_accepted,
+                final_keyframes=final_keyframes,
+                animation_collapse=animation_collapse,
+                classified_root_cause="group_boundary_miss",
+                replacement_or_keep_reason=(
+                    "joined_by_strong_title_continuity_override"
+                ),
+                repair_applied="strong_title_continuity_boundary_override",
+                low_content_title_frame_warning=False,
+                sampling_miss_warning=False,
+                initial_selection_miss_warning=False,
+                group_boundary_miss_warning=True,
+            )
+        )
+
+    trace["traced_window_count"] = len(traced_windows)
+    trace["traced_windows"] = traced_windows[:report_limit]
+    trace["truncated"] = len(traced_windows) > report_limit
+    return trace
+
+
 def select_keyframes(
     candidates: list[dict[str, Any]],
     options: dict[str, Any],
@@ -2158,12 +4056,25 @@ def select_keyframes(
     low_difference_rejected_count = 0
     max_keyframes_reached = False
     comparison_region: dict[str, Any] | None = None
+    fuller_state_update_count = 0
+    fuller_state_update_samples: list[dict[str, Any]] = []
+    candidate_records: list[dict[str, Any]] = []
 
     for candidate in candidates:
         features = image_features(candidate["path"], Image, ImageStat, options)
         comparison_region = comparison_region or features.get("comparison_region")
         quality = evaluate_frame_quality(features, options)
+        candidate_record = {
+            "source_frame_path": candidate["path"],
+            "source_frame_time": float(candidate["time"]),
+            "features": features,
+            "quality_accepted": bool(quality["accepted"]),
+            "quality_metrics": quality["metrics"],
+            "selection_decision": None,
+        }
+        candidate_records.append(candidate_record)
         if not quality["accepted"]:
+            candidate_record["selection_decision"] = "quality_rejected"
             rejected_frame_count += 1
             for reason in quality["reasons"]:
                 increment_count(rejected_reasons, reason)
@@ -2187,6 +4098,7 @@ def select_keyframes(
         previous_valid_features = features
 
         if not accepted:
+            candidate_record["selection_decision"] = "first_accepted_frame"
             accepted.append(
                 {
                     "source_frame_path": candidate["path"],
@@ -2218,20 +4130,52 @@ def select_keyframes(
                 <= float(options["duplicate_hash_distance_threshold"])
             )
             if is_duplicate:
+                candidate_record["selection_decision"] = "duplicate_suppressed"
                 duplicate_rejected_count += 1
                 duplicate_suppressed_count += 1
+                replaced = maybe_replace_keyframe_with_later_candidate(
+                    accepted[-1],
+                    candidate,
+                    features,
+                    quality,
+                    "duplicate_fuller_state_update",
+                    score_vs_last_keyframe,
+                    options,
+                    fuller_state_update_samples,
+                )
+                if replaced:
+                    candidate_record["selection_decision"] = (
+                        "duplicate_fuller_state_update"
+                    )
+                    fuller_state_update_count += 1
                 accepted[-1]["duplicate_suppressed_count"] += 1
-                accepted[-1]["merged_source_frame_count"] += 1
-                accepted[-1]["covered_source_frame_times"].append(float(candidate["time"]))
+                if not replaced:
+                    accepted[-1]["covered_source_frame_times"].append(
+                        float(candidate["time"])
+                    )
+                accepted[-1]["merged_source_frame_count"] = len(
+                    accepted[-1]["covered_source_frame_times"]
+                )
                 continue
 
-            if seconds_since_last < float(options["min_stable_duration_seconds"]):
+            short_interval_scene_change = is_short_interval_scene_change(
+                features,
+                last_features,
+                score_vs_last_keyframe,
+                options,
+            )
+            if (
+                seconds_since_last < float(options["min_stable_duration_seconds"])
+                and not short_interval_scene_change
+            ):
+                candidate_record["selection_decision"] = "stable_too_short_rejected"
                 stable_too_short_rejected_count += 1
                 continue
 
             if (
                 score_vs_last_keyframe >= options["min_visual_difference_score"]
             ):
+                candidate_record["selection_decision"] = "visual_difference_threshold"
                 accepted.append(
                     {
                         "source_frame_path": candidate["path"],
@@ -2247,6 +4191,26 @@ def select_keyframes(
                 )
                 difference_accepted_count += 1
             else:
+                replaced = maybe_replace_keyframe_with_later_candidate(
+                    accepted[-1],
+                    candidate,
+                    features,
+                    quality,
+                    "low_difference_fuller_state_update",
+                    score_vs_last_keyframe,
+                    options,
+                    fuller_state_update_samples,
+                )
+                if replaced:
+                    candidate_record["selection_decision"] = (
+                        "low_difference_fuller_state_update"
+                    )
+                    fuller_state_update_count += 1
+                    accepted[-1]["merged_source_frame_count"] = len(
+                        accepted[-1]["covered_source_frame_times"]
+                    )
+                    continue
+                candidate_record["selection_decision"] = "low_difference_rejected"
                 low_difference_rejected_count += 1
 
         if len(accepted) >= options["max_keyframes"]:
@@ -2261,6 +4225,44 @@ def select_keyframes(
         rejected_frame_samples,
     )
     quality_summary["comparison_region"] = comparison_region
+    candidate_pool_diagnostics = make_candidate_pool_diagnostics(
+        fuller_state_update_count,
+        fuller_state_update_samples,
+    )
+    initial_accepted = list(accepted)
+    if not accepted:
+        animation_collapse = empty_animation_collapse_summary(options, 0)
+    else:
+        original_accepted_count = len(accepted)
+        accepted, animation_collapse = collapse_process_state_keyframes(
+            accepted,
+            options,
+        )
+        animation_collapse["original_keyframe_count"] = original_accepted_count
+        animation_collapse["collapsed_keyframe_count"] = len(accepted)
+    post_group_collapse_keyframe_count = len(accepted)
+    accepted, low_content_lookahead = suppress_low_content_early_states(
+        accepted,
+        candidate_records,
+        options,
+    )
+    animation_collapse["post_group_collapse_keyframe_count"] = (
+        post_group_collapse_keyframe_count
+    )
+    animation_collapse["collapsed_keyframe_count"] = len(accepted)
+    animation_collapse["low_content_lookahead"] = low_content_lookahead
+    animation_collapse["final_state_trace"] = build_final_state_trace(
+        candidate_records,
+        initial_accepted,
+        initial_accepted,
+        accepted,
+        animation_collapse,
+        low_content_lookahead,
+        options,
+    )
+    animation_collapse["candidate_pool_diagnostics"] = candidate_pool_diagnostics
+    quality_summary["animation_collapse"] = animation_collapse
+    quality_summary["candidate_pool_diagnostics"] = candidate_pool_diagnostics
     keyframe_selection = make_keyframe_selection_summary(
         candidates=candidates,
         accepted_count=len(accepted),
@@ -2275,6 +4277,14 @@ def select_keyframes(
         max_keyframes_reached=max_keyframes_reached,
         options=options,
     )
+    keyframe_selection["pre_collapse_keyframe_count"] = animation_collapse.get(
+        "original_keyframe_count"
+    )
+    keyframe_selection["post_collapse_keyframe_count"] = animation_collapse.get(
+        "collapsed_keyframe_count"
+    )
+    keyframe_selection["animation_collapse"] = animation_collapse
+    keyframe_selection["candidate_pool_diagnostics"] = candidate_pool_diagnostics
     if not accepted:
         raise NoAcceptableKeyframes(
             "No candidate frames passed quality and difference filters.",
@@ -2502,6 +4512,31 @@ def build_visual_segments(
                 "duplicate_suppressed_count": keyframe.get(
                     "duplicate_suppressed_count",
                     0,
+                ),
+                "collapse_group_id": keyframe.get("collapse_group_id"),
+                "representative_selection_reason": keyframe.get(
+                    "representative_selection_reason",
+                ),
+                "representative_score": keyframe.get("representative_score"),
+                "representative_score_details": keyframe.get(
+                    "representative_score_details",
+                    {},
+                ),
+                "suppressed_intermediate_times": [
+                    round(float(value), 3)
+                    for value in keyframe.get("suppressed_intermediate_times", [])
+                ],
+                "replaced_intermediate_keyframes": keyframe.get(
+                    "replaced_intermediate_keyframes",
+                    [],
+                ),
+                "candidate_replacement_history": keyframe.get(
+                    "candidate_replacement_history",
+                    [],
+                ),
+                "low_content_replacement_history": keyframe.get(
+                    "low_content_replacement_history",
+                    [],
                 ),
                 "comparison_region_mode": options.get("comparison_region_mode"),
                 "ocr_available": keyframe.get("ocr_available", False),
@@ -2940,6 +4975,9 @@ def run_batch_3(
             quality_summary=quality_summary,
             comparison_region=comparison_region,
             ocr_report=ocr_report,
+            animation_collapse=keyframe_selection.get("animation_collapse")
+            if keyframe_selection
+            else None,
         )
 
         status = "smoke_success" if options["smoke_seconds"] is not None else "success"

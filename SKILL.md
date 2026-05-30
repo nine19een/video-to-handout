@@ -394,12 +394,45 @@ Batch 2.5 规则：
 - 对近似重复画面去重
 - 过滤转场帧、动画帧、短暂闪现画面
 - 将被接受的关键画面复制到 outputs/<run_id>/assets/keyframes/
+- 对同一 slide 或同一讲解阶段的逐步构建过程态做保守压缩
 
 不得：
 
 - 把短暂动画状态当成独立核心页面
 - 把转场帧当成稳定页面
 - 只凭单帧差异直接切分讲义章节
+- 把真正不同 slide 或明显 scene change 合并为一个 keyframe
+
+Batch 4.5A-fix 过程态重复抑制规则：
+
+- 过程态重复抑制只能作为 visual evidence extraction 的后处理，不代表语义级 slide understanding。
+- 应先沿用基础 keyframe selection，再对 accepted keyframes 做保守 post-selection collapse。
+- 只有时间接近、视觉差异未达到 scene change、hash/layout guardrail 未越界时，才允许归入同一 build group。
+- 同一 build group 中应优先保留最后稳定态或配置指定的代表帧，压缩中间态。
+- 必须保留尾段代表帧，不能因 collapse 造成尾端覆盖回退。
+- `frame_report.json` 和 `visual_segments.json` 必须记录 collapse 是否启用、原始 keyframe 数、压缩后 keyframe 数、压掉的中间态数量和有限的 group summary。
+
+Batch 4.5A-fix 过程态失败修复规则：
+
+- 不能只靠调 similarity、hash 或 gap 阈值修复过程态失败。
+- same build group boundary 应检查相邻帧、group anchor 和当前代表候选，避免同一 build-up 序列被局部间隔切裂。
+- group span 可以作为 soft guardrail；若标题/布局连续且 scene-change risk 低，可以保守合并长一点的 build-up chain。
+- 代表帧选择应优先 fuller/final state，而不是只取最新 accepted keyframe。
+- 不依赖 OCR 的 fuller/final state scoring 可以使用非背景内容面积、detail density、layout richness 和时间偏好。
+- 若后续候选帧与当前 keyframe 属于同一页面且 fuller score 明显更高，即使被 duplicate 或 low-difference 路径处理，也应能替换较早不完整态。
+- 若后续帧被删除，audit report 必须能解释它输给代表帧的原因。
+- 报告应记录 boundary decision、representative ranking、candidate replacement history 和 tail collapse check。
+
+Batch 4.5A-fix 最终态缺失修复规则：
+
+- 最终态缺失不能直接归因于 representative selection。应按 candidate frames、initial accepted keyframes、collapse group、representative selection 和 final keyframes 顺序追踪断点。
+- 对低内容、标题占比高、大面积空白的 early state，可以在保守时间窗口内查找 same-context fuller candidate。找到更完整状态时，应压掉早期状态或补入后续状态。
+- same-context 判断只使用轻量视觉特征，不依赖 OCR。标题区域连续性、页面区域差异、fuller score 和相邻变化仍应作为保守 guardrail。
+- build group 中如果出现明显 fullness reset，应视为新 sequence 的断点，避免链式合并跨越真正不同页面。
+- 标题区域高度连续、scene-change risk 低且 fuller score 上升时，可以对 gap 或 hash guardrail 做有限例外，修复同页 build-up 被切裂的问题。
+- 如果没有找到后续 fuller candidate，应保留标题页并报告 sampling/title-slide ambiguity，不得伪装成 final-state success。
+- adaptive local rescan 只能作为默认关闭的 hook。本轮不得全局降低抽帧间隔。
+- audit report 应记录 `final_state_trace`、`low_content_lookahead`、boundary override、fullness reset 和 sampling warning。
 
 ### 视觉段落阶段
 

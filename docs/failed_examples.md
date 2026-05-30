@@ -561,3 +561,130 @@ future rule:
 - 不得为了 mp4 progressive stream 牺牲分辨率。
 - 分辨率不可确认时必须记录 unknown/warning/error，不得声称合格。
 - 全时段覆盖和过程性动画重复属于后续修复阶段，不应混入 resolution repair。
+
+### Batch 4.5A 过程态重复不得污染关键画面集合
+
+failure name: Batch 4.5A process-state duplicate keyframes after full-video extraction
+
+stage: Batch 4.5A full-video visual evidence human gate
+
+run_id: batch2_test
+
+symptom:
+
+- full-video visual extraction 已通过自动检查。
+- raw video、extracted frames 和 keyframes 均达到 1080p 目标。
+- tail coverage 已覆盖到视频尾段。
+- 人工查看 keyframes 时，发现同一 slide 或同一讲解阶段的逐步构建中间态被保留过多。
+
+why this is a problem:
+
+- 讲义需要引用稳定、信息完整、适合学习的关键画面，而不是每一个动画构建中间态。
+- 过程态重复会增加后续 alignment、content_map 和 lecture_handout 的噪声。
+- 自动检查只验证分辨率、数量和覆盖范围，不足以证明关键画面集合适合人工学习材料。
+
+root cause:
+
+- 基础 keyframe selection 采用前向贪心去重，只和上一张已接受 keyframe 比较。
+- 当逐步构建画面每一步都有中等视觉差异时，单步差异足以通过阈值，但整体上仍属于同一页面或同一讲解阶段。
+- 旧报告没有记录过程态 collapse 的行为，人工无法快速判断哪些中间态被保留或压缩。
+
+fix:
+
+- 在 accepted keyframes 之后增加 conservative post-selection collapse。
+- 只在时间接近、视觉差异未达到 scene change、hash/layout guardrail 未越界时，把 keyframes 归入同一 build group。
+- 同一 build group 默认保留最后稳定态或配置指定代表帧，压缩中间态。
+- 在 `frame_report.json` 和 `visual_segments.json` 中记录 collapse 是否启用、压缩前后数量、压缩 group 数和被压缩的中间态时间。
+
+future rule:
+
+- Batch 4.5A 自动检查通过后，仍必须进行人工 keyframe review。
+- 过程态重复抑制属于 visual evidence 后处理，不等同于语义级 slide understanding。
+- 不得为了减少数量合并明显不同 slide、明显 scene change 或重要 demo 状态。
+- 过程态 collapse 的统计和代表帧选择原因必须写入 audit，不得写入最终讲义。
+
+### Batch 4.5A 过程态 collapse 不得保留早期不完整代表帧
+
+failure name: Batch 4.5A process-state collapse under-collapse and wrong representative
+
+stage: Batch 4.5A full-video visual evidence human gate
+
+run_id: batch2_test
+
+symptom:
+
+- 1080p full visual extraction 自动检查通过。
+- tail coverage 自动检查通过。
+- process-state duplicate suppression 自动检查通过。
+- 人工 keyframe review 发现两类问题同时存在：
+  - 同一 build-up 序列仍保留多个过程态。
+  - 某些页面删掉了后续完整态，只保留较早不完整态。
+
+why this is a problem:
+
+- 过程态没有充分压缩会让后续视觉段落和讲义结构重复。
+- 代表帧选错会让讲义引用不完整截图，削弱学习价值。
+- 自动指标中的 keyframe 数量减少不能证明代表帧选择正确。
+
+root cause:
+
+- same-group boundary 只做局部相邻判断，容易被 gap、span 或单步差异切裂。
+- representative selection 只偏向 latest stable 或简单质量指标，没有明确比较 final/fuller state。
+- duplicate 或 low-difference 路径中的后续完整候选可能只被记入 covered time，而不会替换早期代表帧。
+- report 缺少 boundary decision 和 representative ranking，人工难以追踪为什么删除了后续帧。
+
+fix:
+
+- same-group boundary 同时比较相邻帧、group anchor 和当前代表候选。
+- 用标题/布局区域连续性作为 conservative guardrail，避免把真正不同页面合并。
+- 对相邻 group 做保守 merge pass，减少 build-up chain 被切裂。
+- 引入不依赖 OCR 的 fuller/final state score，使用非背景内容面积、细节密度、布局丰富度和时间偏好。
+- duplicate / low-difference 路径中，如果后续候选更完整且仍属于同页，允许替换早期代表帧。
+- report 记录 boundary decisions、representative candidates、score details、candidate replacement history 和 tail collapse check。
+
+future rule:
+
+- 过程态 collapse 的验收必须包含人工 keyframe review。
+- 如果完整态存在于 candidate pool 但未成为代表帧，应优先修 selection/collapse，而不是归因于采样。
+- 如果完整态不在 candidate pool，应在 audit diagnostics 中暴露采样覆盖风险。
+- 不得为了减少 keyframe 数量跨越明显标题变化或 scene change 合并页面。
+
+### Batch 4.5A 最终态存在但 early state 仍被保留
+
+failure name: Batch 4.5A final-state trace exposes retained early state
+
+stage: Batch 4.5A full-video visual evidence human gate
+
+run_id: batch2_test
+
+symptom:
+
+- 同页逐步构建序列中，后续 fuller state 已被采样，甚至已进入最终输出，但较早的低内容状态仍被保留。
+- 部分 build-up sequence 被 hash 或 gap guardrail 切裂，普通组内 representative ranking 无法覆盖整个序列。
+- 部分连续页面又可能被链式合并，导致代表帧被后续不同页面替换。
+
+why this is a problem:
+
+- early state 会继续污染后续视觉段落和讲义截图。
+- 单纯调低 collapse 阈值会扩大跨页面误合并风险。
+- 如果报告只展示最终 keyframe，人工无法判断断点发生在采样、初筛、分组还是代表帧选择。
+
+root cause:
+
+- 最终态缺失不能只归因于 representative selection。必须按 candidate frame、initial accepted keyframe、collapse group、representative selection 和 final keyframe 逐层追踪。
+- 低内容 early state 缺少 same-context fuller candidate lookahead。
+- build group 缺少 fullness reset 断点，允许跨页面链式 over-collapse。
+
+fix:
+
+- 报告输出 `final_state_trace`、`low_content_lookahead`、boundary override、fullness reset 和 sampling warning。
+- 对低内容 early state，在保守 lookahead 窗口内查找 same-context fuller candidate。找到时压掉 early state，并在需要时补入后续 candidate。
+- 对明显 fullness reset 断开 build group。
+- 对标题区域高度连续且 fuller score 上升的序列，有限覆盖 gap 或 hash guardrail。
+- adaptive local rescan 默认关闭，只作为后续明确批准后的 hook。
+
+future rule:
+
+- 自动验收需要同时检查 under-collapse 和 over-collapse。
+- 没有找到后续 fuller candidate 时，应保留标题页并报告 ambiguity，不得伪装成 final-state success。
+- dense interval review 与人工 keyframe review 继续作为进入下一阶段前的 gate。
