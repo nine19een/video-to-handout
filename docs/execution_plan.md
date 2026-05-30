@@ -689,3 +689,88 @@ Batch 4 应基于 Batch 3.x 已验收的 visual segments 和 keyframes 进行字
 - full 1080p visual rerun，并使用 `python -m json.tool` 检查 JSON。
 - 复核 1080p、tail coverage、path consistency 和禁止产物边界。
 - dense interval review、独立 Validation Agent 复核和人工 keyframe review。
+
+## Batch 5A：Content Map / Review Scaffold / Handout Skeleton / Prompt Pack
+
+### 目标
+
+基于已验收的正式 transcript-visual alignment，生成可审计的内容结构、工程审查材料、讲义骨架和可选 prompt pack。该阶段只提供 deterministic scaffold，不生成最终润色后的中文讲义。
+
+### 显式入口
+
+```bash
+python -m src.run_pipeline --config <config> --generate-content-map-only
+```
+
+### 包含内容
+
+- 正式 Batch 4.5A/B 输入 preflight。
+- 源 artifact SHA-256 前后保护。
+- 连续 teaching unit 聚合。
+- 超长 unit 按 transcript cue 边界拆分。
+- 讲义层 representative keyframe 选择。
+- 连续近重复和 rapid visual burst 的讲义层压缩。
+- `audit/content_map.json`
+- `audit/review_report.md`
+- `lecture_handout.md` skeleton / excerpt-based draft
+- 可选 `audit/handout_prompt_pack.jsonl`
+- `ContentGenerationBackend` interface、`NoneBackend` 和 fail-closed registry。
+
+### 不包含内容
+
+- 不重新下载视频。
+- 不重新生成 transcript。
+- 不重新运行视觉提取。
+- 不重新运行 alignment。
+- 不修改底层 keyframe 或已验收 audit 输入。
+- 不发送 HTTP 请求。
+- 不读取 API key。
+- 不新增 LLM SDK 依赖。
+- 不生成最终自然语言讲义。
+
+### Backend 边界
+
+Batch 5A 默认配置：
+
+```yaml
+content_generation_backend: "none"
+content_generation_backend_mode: "skeleton"
+llm_allow_network_calls: false
+```
+
+任意非 `none` backend 在 Batch 5A 中必须 fail closed。OpenAI-compatible、DeepSeek、OpenRouter、Anthropic 和 local adapter 仅作为 Batch 5B 的扩展方向，不属于当前已实现能力。
+
+### 验收门
+
+- `python -m py_compile src/run_pipeline.py src/batch5_generation.py`
+- `python -m src.run_pipeline --help`
+- `python -m unittest tests.test_batch5_generation`
+- `git diff --check`
+- `content_map.json` 合法、非空、时间单调、引用 ID 和 keyframe 路径有效。
+- `review_report.md` 包含 source hashes、近重复组、known issues、prompt pack 摘要和人工检查清单。
+- `lecture_handout.md` 明确标记为 skeleton，包含时间范围和代表截图，不复制完整 transcript，不声称人工审核通过。
+- `handout_prompt_pack.jsonl` 每行合法、长度受限、引用有效，不包含 secret 或完整 transcript dump。
+- 源 artifact hash 在运行前后保持一致。
+- 实现后必须由新的 Validation Agent 和人工抽查继续验收。
+
+### Batch 5A-fix：Prompt Pack Path Containment Repair
+
+`llm_prompt_pack_path` 是相对于 `outputs/<run_id>/` 的 audit artifact 路径。实现必须在任何 clear、unlink、mkdir 或 write 之前，把 configured path 解析为 resolved path，并使用 `Path.relative_to()` 确认它位于 resolved `outputs/<run_id>/audit/` 内。
+
+必须 fail closed 的输入包括：
+
+- absolute path
+- Windows drive-like path
+- `..` traversal
+- 反斜杠或混合分隔符 traversal
+- symlink escape
+- directory path
+- 非 `.jsonl` 文件
+
+不得只检查 `Path.is_absolute()`，也不得使用字符串 `startswith()` 代替路径 containment。
+
+## Batch 5B：Real LLM-backed Handout Generation
+
+Batch 5B 尚未批准实现。后续可在 Batch 5A 已验收的 content map 和 prompt pack 之上增加 provider adapter、结构化响应校验、usage metadata、失败降级和最终中文讲义渲染。
+
+Batch 5B 仍必须保持 grounding、secret 隔离、工程报告隔离和人工验收边界。

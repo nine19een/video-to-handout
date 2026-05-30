@@ -625,3 +625,83 @@ Batch 3.x 通过验收时，只能说明 minimal verifiable visual evidence extr
 - 是否值得把当前视觉证据交给后续 Batch 4 使用
 
 Batch 3.x smoke success 不是 full-video quality guarantee。keyframe 数量减少也不是单独失败依据，可能是重复抑制生效；但报告必须解释减少原因，并由人工看图确认没有漏掉重要视觉变化。
+
+## Batch 5A 内容索引与讲义骨架规则
+
+Batch 5A 的目标是把已经通过验收的正式 transcript-visual alignment 转换为可审计的内容结构、工程审查材料、讲义骨架和可选 prompt pack。它不负责调用真实 LLM，也不代表最终中文讲义已经完成。
+
+Batch 5A 只能显式运行：
+
+```bash
+python -m src.run_pipeline --config <config> --generate-content-map-only
+```
+
+Batch 5A 只能读取正式的：
+
+- `outputs/<run_id>/audit/raw_transcript.json`
+- `outputs/<run_id>/audit/visual_segments.json`
+- `outputs/<run_id>/audit/frame_report.json`
+- `outputs/<run_id>/audit/alignment.json`
+- `outputs/<run_id>/assets/keyframes/`
+
+Batch 5A 不得隐式触发下载、转写、视觉提取或 alignment。运行前后必须校验正式源 artifact hash，避免污染已验收证据。
+
+Batch 5A 可以生成：
+
+- `outputs/<run_id>/audit/content_map.json`
+- `outputs/<run_id>/audit/review_report.md`
+- `outputs/<run_id>/lecture_handout.md`
+- `outputs/<run_id>/audit/handout_prompt_pack.jsonl`
+
+### Skeleton mode
+
+Batch 5A 默认使用：
+
+```yaml
+content_generation_backend: "none"
+content_generation_backend_mode: "skeleton"
+```
+
+`NoneBackend` 只能生成 skeleton / excerpt-based draft。它可以保留时间范围、代表截图、有限字幕摘录和可追溯来源，但不得把 transcript 拼接伪装成最终讲义，不得声称已经完成深度语义理解或人工审核。
+
+真实 LLM-backed generation 延后到 Batch 5B。Batch 5A 中任意非 `none` backend 必须 fail closed，不得静默 fallback，不得发送网络请求，不得读取 API key，不得新增 SDK 依赖。
+
+### Handout-level image selection
+
+讲义层代表图选择不得修改底层 `visual_segments.json` 或 keyframe 文件。
+
+必须遵守：
+
+- 不要为每个 visual segment 机械插图。
+- 默认每个 content unit 最多选择一张代表图。
+- 连续近重复教学示例和过程态画面只保留一张讲义代表图。
+- 优先选择信息更完整、文字更清晰、非过渡态的画面。
+- 被放弃候选及原因必须写入 `content_map.json` 和 `review_report.md`。
+- 自动 dedupe 不能代替人工检查；rapid visual burst 应标记 review。
+
+### Prompt pack
+
+`handout_prompt_pack.jsonl` 属于 audit artifact，不是学习入口。每行最多对应一个 content unit，包含有限字幕摘录、来源 ID、代表图 metadata、grounding rules 和未来结构化输出 schema。
+
+Prompt pack 不得包含：
+
+- 完整 raw transcript dump
+- API key、环境变量值或 Authorization header
+- 图片二进制
+- 原始模型响应
+
+`llm_prompt_pack_path` 必须相对于 `outputs/<run_id>/` 解析，并且规范化后的 resolved path 必须位于 `outputs/<run_id>/audit/` 内。路径 containment 校验必须发生在任何清理、删除、创建目录或写文件之前。
+
+必须拒绝：
+
+- absolute path
+- Windows drive path
+- `..` traversal
+- 使用反斜杠或混合分隔符绕过的 traversal
+- resolved path 或 symlink 指向 `audit/` 外
+- directory path
+- 非 `.jsonl` 输出路径
+
+未来 LLM 输出必须绑定 `source_unit_id`，引用真实 transcript item ID 和 visual segment ID，只使用当前 unit 提供的证据。响应格式错误、空响应或引用越界时，应降级为 skeleton 并写入 `review_report.md`。
+
+Batch 5A skeleton 和未来 LLM-backed draft 都不等于人工验收通过。

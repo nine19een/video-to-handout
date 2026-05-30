@@ -79,3 +79,42 @@ ocr_backend: "none"
 ocr_language:
 ocr_max_chars: 500
 ocr_min_text_length: 4
+
+generate_content_map: true
+generate_review_report: true
+generate_lecture_handout: true
+
+content_generation_backend: "none"
+content_generation_backend_mode: "skeleton"
+generate_llm_prompt_pack: true
+llm_prompt_pack_path: "audit/handout_prompt_pack.jsonl"
+
+content_unit_max_gap_seconds: 45
+content_unit_max_duration_seconds: 240
+content_unit_min_transcript_chars: 80
+
+handout_max_images_per_unit: 1
+handout_near_duplicate_image_policy: "keep_one_representative"
+handout_prefer_fuller_state: true
+handout_include_timestamps: true
+handout_include_generated_notice: true
+handout_min_image_spacing_seconds: 45
+handout_near_duplicate_max_gap_seconds: 40
+handout_near_duplicate_max_difference: 0.20
+handout_rapid_burst_window_seconds: 60
+handout_rapid_burst_min_frames: 3
+
+llm_api_style: "none"
+llm_base_url:
+llm_model:
+llm_api_key_env:
+llm_temperature: 0.2
+llm_max_input_chars_per_unit: 6000
+llm_max_excerpt_chars_per_item: 800
+llm_max_output_tokens: 1200
+llm_timeout_seconds: 60
+llm_max_retries: 2
+llm_concurrency: 1
+llm_save_raw_responses: false
+llm_allow_network_calls: false
+unsupported_backend_behavior: "fail_closed"

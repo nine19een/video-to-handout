@@ -230,6 +230,9 @@ outputs/*/assets/keyframes/*
 !outputs/*/assets/keyframes/.gitkeep
 outputs/*/audit/*.json
 !outputs/*/audit/.gitkeep
+outputs/*/audit/review_report.md
+outputs/*/audit/handout_prompt_pack.jsonl
+outputs/*/lecture_handout.md
 
 # Local credentials and cookies
 cookies*.txt

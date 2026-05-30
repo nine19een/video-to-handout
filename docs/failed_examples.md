@@ -688,3 +688,112 @@ future rule:
 - 自动验收需要同时检查 under-collapse 和 over-collapse。
 - 没有找到后续 fuller candidate 时，应保留标题页并报告 ambiguity，不得伪装成 final-state success。
 - dense interval review 与人工 keyframe review 继续作为进入下一阶段前的 gate。
+
+### Batch 5A 不得把 skeleton 或 transcript 拼接伪装成最终讲义
+
+failure name: Batch 5A skeleton must remain an auditable scaffold
+
+stage: Batch 5A content map / review scaffold / handout skeleton
+
+risk:
+
+- Batch 5A 默认不调用真实 LLM。
+- 如果实现直接拼接 transcript，或用未经审查的规则文本伪装成成熟讲义，学习者可能误以为内容已经完成整理。
+- 如果 skeleton 没有明确标记，后续人工 review 也难以区分结构验证和最终讲义验收。
+
+prevention rule:
+
+- Batch 5A 默认使用 `content_generation_backend: "none"` 和 `content_generation_backend_mode: "skeleton"`。
+- `lecture_handout.md` 必须明确标记为机器生成 skeleton / excerpt-based draft，尚未人工审核。
+- skeleton 只能保留时间范围、代表截图、有限字幕摘录和可追溯来源，不得声称完成深度语义理解。
+- 最终自然语言讲义生成延后到 Batch 5B。
+
+### Batch 5A unsupported backend 不得静默 fallback
+
+failure name: unsupported content generation backend must fail closed
+
+stage: Batch 5A pluggable content generation backend
+
+risk:
+
+- 用户可能提前配置未来 provider。
+- 如果 Batch 5A 静默忽略配置并生成看似完整的文本，产物来源和质量边界会变得不可信。
+
+prevention rule:
+
+- Batch 5A 只注册可执行的 `NoneBackend`。
+- 任意非 `none` backend 必须在写入误导性讲义前 fail closed。
+- Batch 5A 不发送 HTTP 请求，不读取 API key，不新增 SDK 依赖。
+- Provider adapter 只允许在后续批准的 Batch 5B 中实现。
+
+### Batch 5A prompt pack 不得泄露完整 transcript 或 secret
+
+failure name: prompt pack must remain bounded and secret-free
+
+stage: Batch 5A prompt pack generation
+
+risk:
+
+- Prompt pack 用于未来手动或自动生成，如果直接写入完整 transcript，会扩大数据暴露面并失去 unit-level grounding。
+- 如果 API key、环境变量值或请求 header 进入 audit artifact，会造成 secret 泄露。
+
+prevention rule:
+
+- `audit/handout_prompt_pack.jsonl` 每行只对应一个 content unit。
+- 每行只包含长度受限的字幕摘录、来源 ID、代表图 metadata、grounding rules 和未来结构化输出 schema。
+- 不写完整 raw transcript dump、API key、环境变量值、Authorization header、图片二进制或原始模型响应。
+
+### Batch 5A 讲义层不得盲目嵌入全部 keyframes
+
+failure name: handout-level image selection must suppress over-representation
+
+stage: Batch 5A representative keyframe selection
+
+risk:
+
+- 底层 visual evidence 为审计和回溯保留了较多 keyframe。
+- 如果讲义机械插入全部 keyframe，会造成图片过密、过程态重复和教学示例过度展示。
+
+observed review examples:
+
+- `1640/1650/1660/1680` 附近的 HTML / Common Crawl 示例属于有效教学内容，但在讲义层最多保留一张代表图。
+- `4520/4530` 附近的轻微过程态重复应优先选择 fuller representative，或标记人工检查。
+- `5690` 附近的局部内容缺失可以作为 known issue 记录，不应单独阻塞 Batch 5A。
+
+prevention rule:
+
+- 不删除底层 `visual_segments.json` 或 keyframe 文件。
+- 默认每个 content unit 最多选择一张代表图。
+- 连续 near-duplicate 和 rapid visual burst 在讲义层选择一个代表图，并记录被放弃候选和原因。
+- Production selection logic 不得硬编码上述案例时间点。
+- 自动选图不能代替独立 Validation Agent 和人工抽查。
+
+### Batch 5A prompt pack path traversal 不得越界清理或写入
+
+failure name: prompt pack output path must remain inside run audit directory
+
+stage: Batch 5A prompt pack generation
+
+risk:
+
+- 如果 `llm_prompt_pack_path` 只拒绝 absolute path，配置仍可使用 `../` 逃出 run 输出目录。
+- Prompt pack 写入会在 run 目录外创建文件。
+- 输出清理逻辑如果直接处理未经校验的路径，还可能删除 run 目录外的既有文件。
+- 反斜杠、混合分隔符和 symlink 可能绕过字面路径检查。
+
+wrong behavior:
+
+```yaml
+llm_prompt_pack_path: "../escaped_prompt_pack.jsonl"
+```
+
+上述配置不得成功，也不得在 run 输出目录外创建或删除文件。
+
+prevention rule:
+
+- `llm_prompt_pack_path` 相对于 `outputs/<run_id>/` 解析。
+- 允许范围固定为 resolved `outputs/<run_id>/audit/`。
+- 使用 `Path.resolve()` 和 `Path.relative_to()` 做 containment 校验，不使用字符串 `startswith()`。
+- 在任何 clear、unlink、mkdir 或 write 之前完成校验，并在清理和写入前复验 resolved safe path。
+- 拒绝 absolute path、Windows drive-like path、`..` traversal、反斜杠 traversal、mixed separator traversal、symlink escape、directory path 和非 `.jsonl` 文件。
+- 验收必须使用 run 外 sentinel 文件确认非法配置不会造成越界删除。

@@ -5497,6 +5497,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run only Batch 4 transcript to visual evidence alignment.",
     )
     parser.add_argument(
+        "--generate-content-map-only",
+        action="store_true",
+        help="Run only Batch 5A deterministic content map, review scaffold, and handout skeleton generation.",
+    )
+    parser.add_argument(
         "--frame-interval-seconds",
         type=float,
         help="Override the Batch 3 candidate frame interval in seconds.",
@@ -5537,10 +5542,20 @@ def main() -> None:
     if args.extract_visuals_only and args.transcribe_fallback_only:
         parser.error("--extract-visuals-only cannot be combined with --transcribe-fallback-only.")
     if args.align_transcript_visuals_only and (
-        args.extract_visuals_only or args.transcribe_fallback_only
+        args.extract_visuals_only
+        or args.transcribe_fallback_only
+        or args.generate_content_map_only
     ):
         parser.error(
             "--align-transcript-visuals-only cannot be combined with "
+            "--extract-visuals-only, --transcribe-fallback-only, or "
+            "--generate-content-map-only."
+        )
+    if args.generate_content_map_only and (
+        args.extract_visuals_only or args.transcribe_fallback_only
+    ):
+        parser.error(
+            "--generate-content-map-only cannot be combined with "
             "--extract-visuals-only or --transcribe-fallback-only."
         )
 
@@ -5560,6 +5575,17 @@ def main() -> None:
         run_dir, alignment_report = run_batch_4(Path(args.config))
         print(f"Batch 4 output directory: {run_dir}")
         if alignment_report["status"] == "failed":
+            raise SystemExit(1)
+        return
+
+    if args.generate_content_map_only:
+        from src.batch5_generation import run_batch_5a
+
+        config = load_config(Path(args.config).resolve())
+        run_dir = configured_run_dir(config)
+        content_map = run_batch_5a(config, run_dir)
+        print(f"Batch 5A output directory: {run_dir}")
+        if content_map["status"] != "success":
             raise SystemExit(1)
         return
 
