@@ -306,7 +306,7 @@ workflow 应按以下逻辑推进：
 - 保存视频文件路径
 - 保存下载日志或下载摘要
 - 失败时给出明确错误原因
-- 默认以 1080p 作为课程截图和讲义视觉证据目标
+- 默认以 1080p 作为课程截图和讲义视觉证据的首选质量目标
 - 下载报告必须记录实际下载格式和分辨率
 
 不得：
@@ -315,14 +315,18 @@ workflow 应按以下逻辑推进：
 - 将视频 URL 硬编码到脚本中
 - 删除下载日志
 - 为了 progressive mp4 牺牲分辨率，导致默认下载 720p 或 360p
-- 在未获人工批准的情况下把低于 1080p 的视频当成合格视觉证据
+- 在未获人工批准的情况下把低于 1080p 的视频当成已通过讲义截图质量验收的视觉证据
 
-Batch 4.5A-fix-1 规则：
+Batch 4.5A-fix-1 与 Lesson 2 resolution fallback 规则：
 
-- 默认配置应使用 `target_video_height: 1080`、`min_video_height: 1080`、`allow_video_resolution_fallback: false`。
+- 默认配置应使用 `preferred_video_height: 1080`、`min_video_height: 1080`、`allow_video_resolution_fallback: true` 和 `resolution_fallback_strategy: "best_available"`。
+- `target_video_height` 继续作为兼容字段；显式 `preferred_video_height` 的优先级更高。
 - yt-dlp 应优先使用 best video + best audio merge，避免 `best[ext=mp4]/best` 这类容易落到低清 progressive stream 的 selector。
-- 如果实际下载高度低于 `min_video_height` 且 fallback 未允许，`download_report.json` 必须失败或标记为不可接受降级，不得伪装成功。
-- `download_report.json` 应记录 `effective_format_selector`、`downloaded_format_id`、`downloaded_width`、`downloaded_height`、`downloaded_resolution`、codec、filesize 和 `resolution_check`。
+- 默认模式没有达到 1080p 时应自动选择最高可用分辨率，继续 Batch 2，并在报告中记录 quality warning 和 known limitation。
+- 只有显式关闭 `allow_video_resolution_fallback` 的 strict mode 才能因为未达到 `min_video_height` hard fail。
+- 如果 yt-dlp 没有任何可下载视频格式，应以 `NoDownloadableVideoFormat` hard fail。
+- 如果 yt-dlp 报告 JavaScript runtime 缺失，应单独记录 environment warning，不得断言视频本身一定没有 1080p。
+- `download_report.json` 应记录 `effective_format_selector`、`downloaded_format_id`、`downloaded_width`、`downloaded_height`、`downloaded_resolution`、codec、filesize、`resolution_check`、fallback 状态和 environment warnings。
 - 如果无法确认下载分辨率，应记录 `resolution_check.status: unknown` 和 warning/error，不得声称分辨率合格。
 
 ### 字幕获取阶段

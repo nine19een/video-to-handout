@@ -15,9 +15,11 @@ from typing import Any
 REQUIRED_CONFIG_FIELDS = ("video_url", "run_id", "output_dir")
 DEFAULT_SUBTITLE_LANGUAGES = ("en", "zh-Hans", "zh", "zh-CN")
 DEFAULT_OUTPUT_LANGUAGE = "zh-CN"
-DEFAULT_TARGET_VIDEO_HEIGHT = 1080
+DEFAULT_PREFERRED_VIDEO_HEIGHT = 1080
+DEFAULT_TARGET_VIDEO_HEIGHT = DEFAULT_PREFERRED_VIDEO_HEIGHT
 DEFAULT_MIN_VIDEO_HEIGHT = 1080
-DEFAULT_ALLOW_VIDEO_RESOLUTION_FALLBACK = False
+DEFAULT_ALLOW_VIDEO_RESOLUTION_FALLBACK = True
+DEFAULT_RESOLUTION_FALLBACK_STRATEGY = "best_available"
 DEFAULT_MIN_KEYFRAME_HEIGHT = 1080
 DEFAULT_TRANSCRIPTION_BACKEND = "faster-whisper"
 DEFAULT_TRANSCRIPTION_MODEL = "base"
@@ -163,6 +165,10 @@ class DownloadedVideoResolutionUnknown(RuntimeError):
 
 
 class TargetResolutionUnavailable(RuntimeError):
+    pass
+
+
+class NoDownloadableVideoFormat(RuntimeError):
     pass
 
 
@@ -348,45 +354,124 @@ def bool_or_default(value: Any, default: bool) -> bool:
     raise ValueError(f"Expected boolean value, got: {value!r}")
 
 
-def resolve_download_options(config: dict[str, Any]) -> dict[str, Any]:
-    target_height = positive_int_or_default(
+def configured_preferred_video_height(config: dict[str, Any]) -> int:
+    preferred = config.get("preferred_video_height")
+    if preferred is not None and preferred != "":
+        return positive_int_or_default(
+            preferred,
+            DEFAULT_PREFERRED_VIDEO_HEIGHT,
+            "preferred_video_height",
+        )
+    return positive_int_or_default(
         config.get("target_video_height"),
-        DEFAULT_TARGET_VIDEO_HEIGHT,
+        DEFAULT_PREFERRED_VIDEO_HEIGHT,
         "target_video_height",
     )
+
+
+def resolve_download_options(config: dict[str, Any]) -> dict[str, Any]:
+    preferred_height = configured_preferred_video_height(config)
     min_height = positive_int_or_default(
         config.get("min_video_height"),
         DEFAULT_MIN_VIDEO_HEIGHT,
         "min_video_height",
     )
-    if min_height > target_height:
-        raise ValueError("min_video_height must be less than or equal to target_video_height.")
     override = optional_string(config.get("yt_dlp_format"))
     allow_fallback = bool_or_default(
         config.get("allow_video_resolution_fallback"),
         DEFAULT_ALLOW_VIDEO_RESOLUTION_FALLBACK,
     )
+    fallback_strategy = string_or_default(
+        config.get("resolution_fallback_strategy"),
+        DEFAULT_RESOLUTION_FALLBACK_STRATEGY,
+    ).lower()
+    if fallback_strategy != DEFAULT_RESOLUTION_FALLBACK_STRATEGY:
+        raise ValueError(
+            "resolution_fallback_strategy must be best_available."
+        )
     if override is not None:
         selector = override
     else:
         selector = (
-            f"bestvideo[height<={target_height}][height>={min_height}][ext=mp4]+"
+            f"bestvideo[height>={preferred_height}]+bestaudio/"
+            f"bestvideo[height>={preferred_height}][ext=mp4]+"
             "bestaudio[ext=m4a]/"
-            f"bestvideo[height<={target_height}][height>={min_height}]+bestaudio/"
-            f"best[height<={target_height}][height>={min_height}]/"
-            f"bestvideo[height>={min_height}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[height>={min_height}]+bestaudio/"
-            f"best[height>={min_height}]"
+            f"best[height>={preferred_height}]"
         )
         if allow_fallback:
-            selector = f"{selector}/best"
+            selector = f"{selector}/bestvideo+bestaudio/best"
+        else:
+            selector = (
+                f"{selector}/"
+                f"bestvideo[height>={min_height}]+bestaudio/"
+                f"bestvideo[height>={min_height}][ext=mp4]+bestaudio[ext=m4a]/"
+                f"best[height>={min_height}]"
+            )
     return {
-        "target_video_height": target_height,
+        "preferred_video_height": preferred_height,
+        "target_video_height": preferred_height,
         "min_video_height": min_height,
         "allow_video_resolution_fallback": allow_fallback,
+        "resolution_fallback_strategy": fallback_strategy,
         "yt_dlp_format": override,
         "effective_format_selector": selector,
     }
+
+
+class YtDlpWarningCollector:
+    def __init__(self) -> None:
+        self.warnings: list[str] = []
+
+    def debug(self, message: str) -> None:
+        pass
+
+    def info(self, message: str) -> None:
+        pass
+
+    def warning(self, message: str) -> None:
+        self.warnings.append(str(message).strip())
+
+    def error(self, message: str) -> None:
+        pass
+
+
+def environment_warnings_from(messages: list[str]) -> list[str]:
+    environment_markers = (
+        "javascript runtime",
+        "js runtime",
+    )
+    return sorted(
+        {
+            message
+            for message in messages
+            if any(marker in message.lower() for marker in environment_markers)
+        }
+    )
+
+
+def update_run_metadata_acquisition(run_dir: Path, report: dict[str, Any]) -> None:
+    metadata_path = run_dir / "audit" / "run_metadata.json"
+    metadata = read_json(metadata_path) if metadata_path.exists() else {}
+    metadata["acquisition"] = {
+        "status": report.get("acquisition_status"),
+        "requested_preferred_height": report.get("requested_preferred_height"),
+        "actual_video_width": report.get("actual_video_width"),
+        "actual_video_height": report.get("actual_video_height"),
+        "actual_video_resolution": report.get("downloaded_resolution"),
+        "resolution_fallback_used": report.get("resolution_fallback_used"),
+        "resolution_warning": report.get("resolution_warning"),
+        "environment_warnings": report.get("environment_warnings") or [],
+    }
+    write_json(metadata_path, metadata)
+
+
+def write_download_report(
+    report_path: Path,
+    run_dir: Path,
+    report: dict[str, Any],
+) -> None:
+    write_json(report_path, report)
+    update_run_metadata_acquisition(run_dir, report)
 
 
 def first_requested_video_format(info: dict[str, Any]) -> dict[str, Any]:
@@ -551,7 +636,7 @@ def resolution_text(width: Any, height: Any) -> str | None:
 
 def resolution_check(
     actual_height: int | None,
-    target_height: int,
+    preferred_height: int,
     min_height: int,
     allow_fallback: bool,
 ) -> dict[str, Any]:
@@ -559,26 +644,43 @@ def resolution_check(
         return {
             "status": "unknown",
             "message": "Downloaded video height could not be determined.",
-            "target_height": target_height,
+            "target_height": preferred_height,
+            "preferred_height": preferred_height,
             "min_height": min_height,
             "actual_height": None,
         }
-    if actual_height >= min_height:
+    if actual_height >= preferred_height:
         return {
             "status": "success",
-            "message": "Downloaded video height meets the configured minimum.",
-            "target_height": target_height,
+            "message": "Downloaded video height meets the preferred quality target.",
+            "target_height": preferred_height,
+            "preferred_height": preferred_height,
+            "min_height": min_height,
+            "actual_height": actual_height,
+        }
+    if actual_height >= min_height:
+        return {
+            "status": "degraded",
+            "message": (
+                "Downloaded video is below preferred_video_height but meets "
+                "min_video_height. Visual evidence quality requires human review."
+            ),
+            "target_height": preferred_height,
+            "preferred_height": preferred_height,
             "min_height": min_height,
             "actual_height": actual_height,
         }
     return {
         "status": "degraded" if allow_fallback else "failed",
         "message": (
-            "Downloaded video is below min_video_height; fallback was accepted."
+            "Downloaded video is below preferred_video_height and min_video_height; "
+            "best-available fallback was accepted. Low-resolution visual evidence "
+            "quality requires human review."
             if allow_fallback
             else "Downloaded video is below min_video_height and fallback is disabled."
         ),
-        "target_height": target_height,
+        "target_height": preferred_height,
+        "preferred_height": preferred_height,
         "min_height": min_height,
         "actual_height": actual_height,
     }
@@ -618,6 +720,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
     video_dir.mkdir(parents=True, exist_ok=True)
     report_path = audit_dir / "download_report.json"
     download_options = resolve_download_options(config)
+    ytdlp_logger = YtDlpWarningCollector()
 
     base_report: dict[str, Any] = {
         "run_id": run_id,
@@ -633,11 +736,26 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         "webpage_url": None,
         "requested_format": download_options["yt_dlp_format"],
         "effective_format_selector": download_options["effective_format_selector"],
+        "requested_preferred_height": download_options["preferred_video_height"],
         "target_video_height": download_options["target_video_height"],
         "min_video_height": download_options["min_video_height"],
         "allow_video_resolution_fallback": download_options[
             "allow_video_resolution_fallback"
         ],
+        "resolution_fallback_strategy": download_options[
+            "resolution_fallback_strategy"
+        ],
+        "acquisition_status": "failed",
+        "resolution_fallback_used": False,
+        "resolution_warning": None,
+        "environment_warnings": [],
+        "selected_format_id": None,
+        "selected_format_note": None,
+        "selected_ext": None,
+        "selected_vcodec": None,
+        "selected_acodec": None,
+        "actual_video_width": None,
+        "actual_video_height": None,
         "downloaded_format_id": None,
         "downloaded_ext": None,
         "downloaded_width": None,
@@ -651,6 +769,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
             "status": "unknown",
             "message": "Download has not completed.",
             "target_height": download_options["target_video_height"],
+            "preferred_height": download_options["preferred_video_height"],
             "min_height": download_options["min_video_height"],
             "actual_height": None,
         },
@@ -667,6 +786,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
             "noplaylist": True,
             "quiet": False,
             "no_warnings": False,
+            "logger": ytdlp_logger,
             "hls_prefer_native": True,
             "nopart": False,
             "merge_output_format": "mp4",
@@ -675,23 +795,33 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
             info = ydl.extract_info(video_url, download=True)
     except Exception as error:
         message = str(error)
+        warnings = sorted(set([*ytdlp_logger.warnings, message]))
+        environment_warnings = environment_warnings_from(warnings)
+        base_report["warnings"] = warnings
+        base_report["environment_warnings"] = environment_warnings
         if "format" in message.lower() and "available" in message.lower():
-            resolution_error = TargetResolutionUnavailable(
-                "No downloadable format met min_video_height. "
-                "1080p acquisition is required unless fallback is explicitly allowed."
-            )
-            base_report["error"] = error_payload(resolution_error)
+            if download_options["allow_video_resolution_fallback"]:
+                acquisition_error: RuntimeError = NoDownloadableVideoFormat(
+                    "yt-dlp could not find any downloadable video format. "
+                    "Format extraction may be incomplete when environment warnings are present."
+                )
+            else:
+                acquisition_error = TargetResolutionUnavailable(
+                    "No downloadable format met min_video_height while resolution "
+                    "fallback is disabled."
+                )
+            base_report["error"] = error_payload(acquisition_error)
             base_report["resolution_check"] = {
                 "status": "failed",
-                "message": str(resolution_error),
+                "message": str(acquisition_error),
                 "target_height": download_options["target_video_height"],
+                "preferred_height": download_options["preferred_video_height"],
                 "min_height": download_options["min_video_height"],
                 "actual_height": None,
             }
-            base_report["warnings"] = [message]
         else:
             base_report["error"] = error_payload(error)
-        write_json(report_path, base_report)
+        write_download_report(report_path, run_dir, base_report)
         return base_report, None
 
     video_path = find_downloaded_video(info, video_dir)
@@ -700,12 +830,12 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
             "type": "MissingDownloadedFile",
             "message": "yt-dlp completed but no downloaded video file was found.",
         }
-        write_json(report_path, base_report)
+        write_download_report(report_path, run_dir, base_report)
         return base_report, info
 
     video_format = first_requested_video_format(info)
     probe = probe_video_metadata(video_path)
-    warnings = []
+    warnings = list(ytdlp_logger.warnings)
     if probe.get("warning"):
         warnings.append(str(probe["warning"]))
     probed_width = probe.get("width")
@@ -721,7 +851,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         warnings.append(f"Downloaded height was not numeric: {downloaded_height!r}")
     check = resolution_check(
         actual_height=actual_height,
-        target_height=int(download_options["target_video_height"]),
+        preferred_height=int(download_options["preferred_video_height"]),
         min_height=int(download_options["min_video_height"]),
         allow_fallback=bool(download_options["allow_video_resolution_fallback"]),
     )
@@ -735,6 +865,7 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
     report = {
         **base_report,
         "status": "success",
+        "acquisition_status": "degraded" if check["status"] == "degraded" else "success",
         "video_path": str(video_path),
         "video_id": info.get("id"),
         "title": info.get("title"),
@@ -743,6 +874,19 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
         "extractor": info.get("extractor"),
         "extractor_key": info.get("extractor_key"),
         "webpage_url": info.get("webpage_url") or video_url,
+        "resolution_fallback_used": (
+            check["status"] == "degraded"
+            and bool(download_options["allow_video_resolution_fallback"])
+        ),
+        "resolution_warning": check["message"] if check["status"] != "success" else None,
+        "environment_warnings": environment_warnings_from(warnings),
+        "selected_format_id": requested_format_id(info),
+        "selected_format_note": video_format.get("format_note") or info.get("format_note"),
+        "selected_ext": video_path.suffix.lstrip(".") or info.get("ext"),
+        "selected_vcodec": probe.get("vcodec") or video_format.get("vcodec"),
+        "selected_acodec": probe.get("acodec") or info.get("acodec"),
+        "actual_video_width": downloaded_width,
+        "actual_video_height": downloaded_height,
         "downloaded_format_id": requested_format_id(info),
         "downloaded_ext": video_path.suffix.lstrip(".") or info.get("ext"),
         "downloaded_width": downloaded_width,
@@ -760,12 +904,16 @@ def download_video(config: dict[str, Any], run_dir: Path) -> tuple[dict[str, Any
     if check["status"] == "unknown":
         error = DownloadedVideoResolutionUnknown(check["message"])
         report["status"] = "failed"
+        report["acquisition_status"] = "failed"
+        report["resolution_warning"] = check["message"]
         report["error"] = error_payload(error)
     elif check["status"] == "failed":
         error = DownloadedVideoBelowMinimumResolution(check["message"])
         report["status"] = "failed"
+        report["acquisition_status"] = "failed"
+        report["resolution_warning"] = check["message"]
         report["error"] = error_payload(error)
-    write_json(report_path, report)
+    write_download_report(report_path, run_dir, report)
     return report, info
 
 
@@ -1402,11 +1550,7 @@ def resolve_visual_options(
             DEFAULT_OCR_MIN_TEXT_LENGTH,
             "ocr_min_text_length",
         ),
-        "target_video_height": positive_int_or_default(
-            config.get("target_video_height"),
-            DEFAULT_TARGET_VIDEO_HEIGHT,
-            "target_video_height",
-        ),
+        "target_video_height": configured_preferred_video_height(config),
         "min_keyframe_height": positive_int_or_default(
             config.get("min_keyframe_height"),
             DEFAULT_MIN_KEYFRAME_HEIGHT,

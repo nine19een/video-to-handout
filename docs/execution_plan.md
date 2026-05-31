@@ -561,9 +561,12 @@ Batch 4 应基于 Batch 3.x 已验收的 visual segments 和 keyframes 进行字
 
 ### 包含内容
 
-- Batch 2 yt-dlp format selection 默认优先 1080p。
-- 默认 `target_video_height: 1080`、`min_video_height: 1080`、`allow_video_resolution_fallback: false`。
-- `download_report.json` 记录格式选择、实际 format id、width、height、resolution、codec、filesize 和 `resolution_check`。
+- Batch 2 yt-dlp format selection 默认优先 1080p；1080p 不可用时选择最高可用分辨率。
+- 默认 `preferred_video_height: 1080`、`min_video_height: 1080`、`allow_video_resolution_fallback: true`、`resolution_fallback_strategy: "best_available"`。
+- `target_video_height` 作为旧配置兼容字段继续可读；strict mode 需要显式关闭 fallback。
+- `download_report.json` 记录格式选择、实际 format id、width、height、resolution、codec、filesize、`resolution_check`、fallback 状态和 environment warnings。
+- 低于 1080p 的下载可以继续 Batch 2，但必须标记 quality warning，并进入后续人工截图质量检查。
+- JavaScript runtime 缺失属于 environment warning；不得直接断言视频本身没有 1080p。
 - Batch 3 `frame_report.json` 记录 raw video / extracted frame / keyframe resolution。
 - keyframe height 低于 `min_keyframe_height` 时必须可诊断，不得伪装为合格视觉证据。
 

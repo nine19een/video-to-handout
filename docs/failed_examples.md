@@ -549,9 +549,9 @@ root cause:
 
 fix:
 
-- Batch 2 默认使用 best video + best audio merge，优先满足 `target_video_height: 1080` 和 `min_video_height: 1080`。
-- 默认 `allow_video_resolution_fallback: false`。
-- 低于 `min_video_height` 的下载必须失败或标记为不可接受降级，不得伪装成功。
+- Batch 2 默认使用 best video + best audio merge，优先满足 `preferred_video_height: 1080`。
+- 默认允许 `resolution_fallback_strategy: "best_available"`；低于首选高度时必须标记降级和 quality warning，不得伪装成已通过讲义截图质量验收。
+- 只有显式关闭 fallback 的 strict mode 才因为低于 `min_video_height` 失败。
 - `download_report.json` 必须记录格式选择和实际下载分辨率。
 - `frame_report.json` 必须记录 raw video、extracted frame 和 keyframe resolution，并暴露 keyframe height 是否低于最低要求。
 
@@ -561,6 +561,41 @@ future rule:
 - 不得为了 mp4 progressive stream 牺牲分辨率。
 - 分辨率不可确认时必须记录 unknown/warning/error，不得声称合格。
 - 全时段覆盖和过程性动画重复属于后续修复阶段，不应混入 resolution repair。
+
+### Lesson 2 默认 1080p 硬门槛阻塞 video-only 迁移验证
+
+failure name: Lesson 2 acquisition must allow best-available resolution fallback
+
+stage: Batch 2 原始视频下载
+
+run_id: lesson2
+
+symptom:
+
+- 第二节课只提供公开视频 URL 后，Batch 2 在下载阶段停止。
+- 报告记录 `TargetResolutionUnavailable`。
+- 当前配置没有显式要求 strict 1080p，但旧默认值为 `min_video_height: 1080` 和 `allow_video_resolution_fallback: false`。
+- yt-dlp 同时报告本机缺少受支持的 JavaScript runtime，因此不能断言视频本身一定没有 1080p。
+
+why this is a problem:
+
+- video-only 迁移验证应优先获取高质量视频，但不能因为公开视频只有较低可用分辨率就默认终止整个 workflow。
+- 下载是否可以继续，与截图是否足够清晰、是否能通过人工讲义质量验收，是两个不同门槛。
+- 环境导致的格式枚举不完整，不能被误写成视频内容侧的确定结论。
+
+fix:
+
+- 默认使用 `preferred_video_height: 1080`、`allow_video_resolution_fallback: true` 和 `resolution_fallback_strategy: "best_available"`。
+- 没有首选高度时选择最高可用分辨率，并记录 `resolution_fallback_used`、`resolution_warning` 和 `environment_warnings`。
+- 完全没有可下载格式时使用 `NoDownloadableVideoFormat` hard fail。
+- 显式关闭 fallback 的 strict mode 保留 `TargetResolutionUnavailable`。
+- 低于 1080p 的视觉证据必须进入后续人工截图质量检查。
+
+future rule:
+
+- 1080p 是默认首选质量目标，不是 Batch 2 默认 hard requirement。
+- JavaScript runtime warning 必须与分辨率 warning 分开记录。
+- 不得因为 fallback 下载成功就声称低清截图已经适合作为讲义视觉证据。
 
 ### Batch 4.5A 过程态重复不得污染关键画面集合
 
