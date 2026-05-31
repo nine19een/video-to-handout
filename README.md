@@ -1,4 +1,4 @@
-# lecture-video-handout-workflow
+# video-to-handout
 
 A video-only workflow that turns a public lecture video URL into grounded transcript, keyframe, timeline-alignment, and handout-generation artifacts, then uses an agent-assisted Writer phase to produce a learner-facing Chinese handout.
 
