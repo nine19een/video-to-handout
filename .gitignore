@@ -238,3 +238,7 @@ outputs/*/lecture_handout.md
 cookies*.txt
 *.cookies
 secrets/
+
+# Local runtime artifacts
+outputs/
+configs/*.local.yaml
