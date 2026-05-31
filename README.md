@@ -6,9 +6,9 @@ A video-only workflow that turns a public lecture video URL into grounded transc
 
 ## Demo Outputs / 示例输出
 
-The repository includes two demo runs based on public lecture videos. The polished handouts and Writer reports are stored under `examples/`, so they can be reviewed without relying on local runtime output.
+The repository includes two demo runs based on public lecture videos. The polished handouts and Writer reports are stored under `examples/`.
 
-仓库中提供了两份公开视频 demo。成品讲义与 Writer report 保存在 `examples/` 下，不依赖本地 `outputs/` 目录。
+仓库中提供了两份公开视频 demo。成品讲义与 Writer report 保存在 `examples/` 下。
 
 | Demo | Polished Chinese handout / 中文讲义 | Writer report |
 | --- | --- | --- |
@@ -71,9 +71,9 @@ The local Python pipeline automatically produces grounded mechanical artifacts t
 
 ## Demo Examples / 示例讲义
 
-[Lecture 1](examples/lecture1/) and [Lecture 2](examples/lecture2/) demonstrate the expected Chinese handout format. Each example also includes audit files and keyframes for reviewing how the handout was grounded.
+[Lecture 1](examples/lecture1/) and [Lecture 2](examples/lecture2/) demonstrate the expected Chinese handout format. Each example includes the polished handout, its Writer report, preview image, and referenced keyframes.
 
-[Lecture 1](examples/lecture1/) 和 [Lecture 2](examples/lecture2/) 展示了中文讲义的目标形态。示例目录同时保留 audit 文件和关键帧，便于复查生成过程。它们是 demo outputs，不代表已经完成最终人工审核。
+[Lecture 1](examples/lecture1/) 和 [Lecture 2](examples/lecture2/) 展示了中文讲义的目标形态。每个示例包含成品讲义、Writer report、预览图和讲义引用的关键帧。
 
 ## Usage / 使用说明
 
